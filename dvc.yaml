@@ -1,0 +1,41 @@
+stages:
+  # Stage 1: Preprocess raw .edf → .npz epochs
+  preprocess:
+    cmd: python feature_engineering/preprocess.py
+      --input-dir data/raw
+      --output-dir data/processed
+    deps:
+      - feature_engineering/preprocess.py
+      - data/raw
+    outs:
+      - data/processed
+
+  # Stage 2: Extract features → parquet
+  extract_features:
+    cmd: python feature_engineering/extract_features.py
+      --input-dir data/processed
+      --output-dir data/features
+    deps:
+      - feature_engineering/extract_features.py
+      - data/processed
+    outs:
+      - data/features/features.parquet
+
+  # Stage 3: Train model (local, không dùng SageMaker)
+  train:
+    cmd: python training/train.py
+      --data-dir data/features
+      --model-dir models/
+      --model-type xgboost
+    deps:
+      - training/train.py
+      - data/features/features.parquet
+    params:
+      - params.yaml:
+          - train.test_size
+          - train.random_seed
+    metrics:
+      - metrics.json:
+          cache: false
+    outs:
+      - models/

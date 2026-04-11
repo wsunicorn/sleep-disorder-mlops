@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  # ── Mosquitto MQTT broker ──────────────────────────────────
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  # ── PostgreSQL (thay thế RDS local dev) ───────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: sleep-db
+    environment:
+      POSTGRES_USER: sleepuser
+      POSTGRES_PASSWORD: sleeppass
+      POSTGRES_DB: sleepdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # ── Redis (thay thế ElastiCache local dev) ────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sleep-redis
+    ports:
+      - "6379:6379"
+
+  # ── MLflow Tracking Server ─────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    container_name: mlflow-server
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://sleepuser:sleeppass@db:5432/sleepdb
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlartifacts
+    volumes:
+      - mlartifacts:/mlartifacts
+    depends_on:
+      - db
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://sleepuser:sleeppass@db:5432/sleepdb
+      --default-artifact-root /mlartifacts
+
+  # ── Django Web App ─────────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: sleep-portal
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: sleep_portal.settings.development
+      DJANGO_DEBUG: "True"
+      DJANGO_SECRET_KEY: local-dev-secret-key
+      DATABASE_URL: postgresql://sleepuser:sleeppass@db:5432/sleepdb
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MQTT_BROKER_HOST: mqtt
+    depends_on:
+      - db
+      - redis
+      - mlflow
+
+volumes:
+  pgdata:
+  mlartifacts:
