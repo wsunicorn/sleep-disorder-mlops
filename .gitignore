@@ -12,14 +12,15 @@ dist/
 build/
 
 # DVC — data files không commit lên Git
-data/raw/
-data/processed/
-data/features/
+data/raw/*
+data/processed/*
+data/features/*
 !data/raw/.gitkeep
+!data/raw/*.dvc
 !data/processed/.gitkeep
 !data/features/.gitkeep
-*.dvc
 !.dvc/config
+!.dvc
 
 # MLflow
 mlruns/
