@@ -1,0 +1,516 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Inference Studio — Sleep Portal{% endblock %}
+
+{% block content %}
+<div class="page-header mb-4">
+  <span class="eyebrow">Prediction</span>
+  <h1 class="hero-title" style="font-size:2rem">Inference Studio</h1>
+  <p class="hero-copy" style="color:var(--ink-soft)">
+    Run sleep stage / disorder predictions using feature vectors, CSV batch files, or raw EDF recordings.
+  </p>
+</div>
+
+<!-- Tab navigation -->
+<ul class="nav nav-pills mb-4 gap-2" id="predictTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="btn btn-nav btn-pill active" id="tab-single" data-bs-toggle="tab" data-bs-target="#panel-single" type="button" role="tab">
+      Single vector
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="btn btn-nav btn-pill" id="tab-batch" data-bs-toggle="tab" data-bs-target="#panel-batch" type="button" role="tab">
+      Batch CSV
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="btn btn-nav btn-pill" id="tab-edf" data-bs-toggle="tab" data-bs-target="#panel-edf" type="button" role="tab">
+      EDF file
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="btn btn-nav btn-pill" id="tab-json" data-bs-toggle="tab" data-bs-target="#panel-json" type="button" role="tab">
+      JSON / API
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+
+  <!-- ── Tab 1: Single vector ─────────────────────────────── -->
+  <div class="tab-pane fade show active" id="panel-single" role="tabpanel">
+    <div class="section-card">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Input</span>
+          <h3>Single epoch feature vector</h3>
+        </div>
+        <span class="chip">{{ expected_feature_count }} floats expected</span>
+      </div>
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <div class="studio-panel">
+            <label class="form-label" for="feature-input">
+              Comma-separated feature values
+            </label>
+            <textarea
+              id="feature-input"
+              class="form-control studio-textarea"
+              spellcheck="false"
+              rows="6"
+              placeholder="0.12, 0.05, 0.31, ...  ({{ expected_feature_count }} values)"></textarea>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button class="btn btn-outline-dark btn-pill btn-sm" id="sample-btn" type="button">Load sample</button>
+              <button class="btn btn-accent btn-pill" id="single-predict-btn" type="button">Predict epoch</button>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="studio-panel result-panel h-100">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">Result</label>
+              <span id="single-status" class="chip">Idle</span>
+            </div>
+            <pre id="single-output" class="result-output">{
+  "predicted_class": null
+}</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature reference table -->
+      <details class="mt-4">
+        <summary class="fw-bold" style="cursor:pointer;color:var(--brand)">Feature schema reference ({{ expected_feature_count }} features)</summary>
+        <div class="table-responsive mt-3">
+          <table class="table table-theme table-sm">
+            <thead><tr><th>#</th><th>Feature</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td>0–4</td><td>ch0_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 0</td></tr>
+              <tr><td>5–9</td><td>ch1_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 1</td></tr>
+              <tr><td>10–14</td><td>ch2_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 2</td></tr>
+              <tr><td>15–19</td><td>ch3_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 3</td></tr>
+              <tr><td>20–24</td><td>ch4_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 4</td></tr>
+              <tr><td>25–29</td><td>delta/theta/alpha/beta/gamma_power_mean</td><td>Mean absolute band power across channels</td></tr>
+              <tr><td>30–34</td><td>delta/theta/alpha/beta/gamma_power_std</td><td>Std of band power across channels</td></tr>
+              <tr><td>35</td><td>spectral_entropy_mean</td><td>Signal complexity</td></tr>
+              <tr><td>36</td><td>peak_frequency_mean</td><td>Dominant frequency (Hz)</td></tr>
+              <tr><td>37</td><td>mean_frequency_mean</td><td>Power-weighted mean frequency</td></tr>
+              <tr><td>38</td><td>amplitude_mean</td><td>Mean absolute amplitude</td></tr>
+              <tr><td>39</td><td>amplitude_std</td><td>Amplitude standard deviation</td></tr>
+              <tr><td>40</td><td>rms</td><td>Root mean square amplitude</td></tr>
+              <tr><td>41</td><td>delta_beta_ratio</td><td>Drowsiness marker</td></tr>
+              <tr><td>42</td><td>theta_alpha_ratio</td><td>Sleepiness marker</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ── Tab 2: Batch CSV ─────────────────────────────────── -->
+  <div class="tab-pane fade" id="panel-batch" role="tabpanel">
+    <div class="section-card">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Batch input</span>
+          <h3>CSV file upload</h3>
+        </div>
+      </div>
+      <p class="helper-text mb-4">
+        Upload a CSV file where each row contains exactly <strong>{{ expected_feature_count }} numeric features</strong>.
+        Optional header row is auto-detected. Maximum 256 rows per request.
+      </p>
+
+      <div class="row g-4">
+        <div class="col-md-5">
+          <div class="studio-panel">
+            <label class="form-label" for="batch-file">Select CSV file</label>
+            <input id="batch-file" class="form-control" type="file" accept=".csv,text/csv">
+            <p class="helper-text mt-2">Drag &amp; drop or click to browse</p>
+            <div id="batch-file-info" class="mt-2 d-none">
+              <span class="chip chip-soft" id="batch-file-name"></span>
+              <span class="chip" id="batch-row-count"></span>
+            </div>
+            <button class="btn btn-accent btn-pill mt-3" id="batch-predict-btn" type="button" disabled>
+              Run batch prediction
+            </button>
+          </div>
+        </div>
+        <div class="col-md-7">
+          <div id="batch-results-wrapper" class="section-card" style="background:var(--bg-strong);padding:1rem">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>Results</strong>
+              <span id="batch-status" class="chip">No file loaded</span>
+            </div>
+            <div class="table-responsive" style="max-height:320px;overflow-y:auto">
+              <table class="table table-theme align-middle mb-0">
+                <thead>
+                  <tr><th>Row</th><th>Predicted class</th></tr>
+                </thead>
+                <tbody id="batch-results-body">
+                  <tr><td colspan="2" class="text-muted">Upload a CSV to see results.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <button class="btn btn-outline-dark btn-sm btn-pill mt-2 d-none" id="batch-download-btn">
+              Download results CSV
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab 3: EDF file ──────────────────────────────────── -->
+  <div class="tab-pane fade" id="panel-edf" role="tabpanel">
+    <div class="section-card">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Raw signal</span>
+          <h3>EDF file prediction</h3>
+        </div>
+        <span class="chip chip-warning">Full pipeline</span>
+      </div>
+      <p class="helper-text mb-4">
+        Upload a raw <code>.edf</code> polysomnographic recording. The server will apply the full preprocessing
+        pipeline: bandpass filter → 30s epoch segmentation → feature extraction → prediction.
+        <br><strong>Note:</strong> Large EDF files (&gt; 100 MB) may take 30–60 seconds to process.
+      </p>
+
+      <div class="row g-4">
+        <div class="col-md-5">
+          <div class="studio-panel">
+            <label class="form-label" for="edf-file">Select EDF file</label>
+            <input id="edf-file" class="form-control" type="file" accept=".edf">
+            <p class="helper-text mt-2">Format: European Data Format (.edf)</p>
+            <div id="edf-file-info" class="mt-2 d-none">
+              <span class="chip chip-soft" id="edf-file-name"></span>
+            </div>
+            <button class="btn btn-accent btn-pill mt-3" id="edf-predict-btn" type="button" disabled>
+              Process &amp; predict
+            </button>
+            <div id="edf-progress" class="mt-3 d-none">
+              <div class="progress" style="height:6px">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:100%"></div>
+              </div>
+              <p class="helper-text mt-1">Processing EDF — this may take a moment…</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-7">
+          <div class="studio-panel result-panel">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">EDF Prediction Results</label>
+              <span id="edf-status" class="chip">No file loaded</span>
+            </div>
+            <pre id="edf-output" class="result-output" style="max-height:300px">{
+  "epochs": [],
+  "predicted_class": null
+}</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pipeline diagram -->
+      <div class="pipeline-diagram mt-4">
+        <span class="pipeline-step">📁 EDF file</span>
+        <span class="pipeline-arrow">→</span>
+        <span class="pipeline-step">🔬 MNE filter</span>
+        <span class="pipeline-arrow">→</span>
+        <span class="pipeline-step">✂️ 30s epochs</span>
+        <span class="pipeline-arrow">→</span>
+        <span class="pipeline-step">📐 43 features</span>
+        <span class="pipeline-arrow">→</span>
+        <span class="pipeline-step">🤖 XGBoost</span>
+        <span class="pipeline-arrow">→</span>
+        <span class="pipeline-step chip chip-soft">Prediction</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab 4: JSON / API ────────────────────────────────── -->
+  <div class="tab-pane fade" id="panel-json" role="tabpanel">
+    <div class="section-card">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Direct API</span>
+          <h3>JSON &amp; curl examples</h3>
+        </div>
+      </div>
+
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <h5>POST /api/v1/predict/</h5>
+          <pre class="result-output" style="font-size:0.78rem">curl -X POST \
+  /api/v1/predict/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "features": [[
+      0.10, 0.05, 0.03, 0.02, 0.01,
+      0.10, 0.05, 0.03, 0.02, 0.01,
+      0.10, 0.05, 0.03, 0.02, 0.01,
+      0.10, 0.05, 0.03, 0.02, 0.01,
+      0.10, 0.05, 0.03, 0.02, 0.01,
+      10.0, 5.0, 8.0, 3.0, 15.0,
+      1.0, 0.5, 1.0, 0.5, 1.0,
+      1.5, 5.0, 0.8, 0.5, 0.9,
+      0.7, 2.0, 1.5
+    ]]
+  }'</pre>
+          <h5 class="mt-3">POST /api/v1/predict-edf/</h5>
+          <pre class="result-output" style="font-size:0.78rem">curl -X POST \
+  /api/v1/predict-edf/ \
+  -F "file=@recording.edf"</pre>
+        </div>
+        <div class="col-lg-6">
+          <h5>Expected response</h5>
+          <pre class="result-output" style="font-size:0.78rem">{
+  "predicted_class": "Wake",
+  "predictions": ["Wake", "S1", "S2"],
+  "prediction_count": 3,
+  "class_counts": {"Wake": 1, "S1": 1, "S2": 1},
+  "cached": false
+}</pre>
+          <h5 class="mt-3">Label mapping</h5>
+          <div class="table-responsive">
+            <table class="table table-theme table-sm mt-2">
+              <thead><tr><th>Value</th><th>Stage / Class</th></tr></thead>
+              <tbody>
+                <tr><td>0</td><td>Wake (W)</td></tr>
+                <tr><td>1</td><td>Stage 1 (S1 — light sleep)</td></tr>
+                <tr><td>2</td><td>Stage 2 (S2 — intermediate)</td></tr>
+                <tr><td>3</td><td>Stage 3 (S3 — deep sleep)</td></tr>
+                <tr><td>4</td><td>Stage 4 (S4 — deep sleep)</td></tr>
+                <tr><td>5</td><td>REM sleep</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="d-flex gap-2 mt-3">
+            <a class="btn btn-outline-dark btn-pill btn-sm" href="/api/v1/health/" target="_blank" rel="noreferrer">Health check</a>
+            <a class="btn btn-outline-dark btn-pill btn-sm" href="/api/v1/model-info/" target="_blank" rel="noreferrer">Model info</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live JSON editor -->
+      <div class="mt-4">
+        <h5>Live JSON editor</h5>
+        <div class="row g-3">
+          <div class="col-lg-7">
+            <textarea id="json-editor" class="form-control studio-textarea" rows="10" spellcheck="false">{
+  "features": [[
+    0.10, 0.05, 0.03, 0.02, 0.01,
+    0.10, 0.05, 0.03, 0.02, 0.01,
+    0.10, 0.05, 0.03, 0.02, 0.01,
+    0.10, 0.05, 0.03, 0.02, 0.01,
+    0.10, 0.05, 0.03, 0.02, 0.01,
+    10.0, 5.0, 8.0, 3.0, 15.0,
+    1.0, 0.5, 1.0, 0.5, 1.0,
+    1.5, 5.0, 0.8, 0.5, 0.9,
+    0.7, 2.0, 1.5
+  ]]
+}</textarea>
+            <button class="btn btn-accent btn-pill mt-2" id="json-send-btn" type="button">Send request</button>
+          </div>
+          <div class="col-lg-5">
+            <div class="studio-panel result-panel h-100">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <label class="form-label mb-0">Response</label>
+                <span id="json-status" class="chip">Idle</span>
+              </div>
+              <pre id="json-output" class="result-output" style="min-height:160px">—</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-content -->
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const PREDICT_URL = "/api/v1/predict/";
+  const PREDICT_EDF_URL = "/api/v1/predict-edf/";
+  const EXPECTED = {{ expected_feature_count }};
+  const STAGE_MAP = { "0": "Wake", "1": "S1", "2": "S2", "3": "S3", "4": "S4", "5": "REM" };
+
+  function labelClass(c) {
+    return STAGE_MAP[String(c)] || String(c);
+  }
+
+  function setChip(el, text, variant) {
+    el.textContent = text;
+    el.className = "chip" + (variant ? " chip-" + variant : "");
+  }
+
+  function parseCSVRow(line) {
+    return line.split(",").map(s => Number(s.trim()));
+  }
+
+  // ── Single vector ────────────────────────────────────────────────────
+  const sampleFeatures = Array.from({ length: EXPECTED }, (_, i) => +((i + 1) / 10).toFixed(2));
+  const featureInput = document.getElementById("feature-input");
+  const singleStatus = document.getElementById("single-status");
+  const singleOutput = document.getElementById("single-output");
+
+  document.getElementById("sample-btn").addEventListener("click", () => {
+    featureInput.value = sampleFeatures.join(", ");
+  });
+
+  document.getElementById("single-predict-btn").addEventListener("click", async () => {
+    setChip(singleStatus, "Running…", "warning");
+    try {
+      const values = featureInput.value.split(/[\s,]+/).filter(Boolean).map(Number);
+      if (values.length !== EXPECTED || values.some(isNaN)) throw new Error(`Expected ${EXPECTED} numeric values.`);
+      const res = await fetch(PREDICT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ features: [values] }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
+      // Map labels
+      if (payload.predicted_class !== undefined) payload.predicted_class = labelClass(payload.predicted_class);
+      if (payload.predictions) payload.predictions = payload.predictions.map(labelClass);
+      singleOutput.textContent = JSON.stringify(payload, null, 2);
+      setChip(singleStatus, payload.cached ? "Cached" : "Done", "success");
+    } catch (err) {
+      singleOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
+      setChip(singleStatus, "Error", "danger");
+    }
+  });
+
+  // ── Batch CSV ────────────────────────────────────────────────────────
+  let batchRows = null;
+  const batchFile = document.getElementById("batch-file");
+  const batchBtn = document.getElementById("batch-predict-btn");
+  const batchStatus = document.getElementById("batch-status");
+  const batchBody = document.getElementById("batch-results-body");
+  const batchDlBtn = document.getElementById("batch-download-btn");
+  let batchResultData = [];
+
+  batchFile.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById("batch-file-name").textContent = file.name;
+    document.getElementById("batch-file-info").classList.remove("d-none");
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    // Detect header: skip if first row contains non-numeric
+    const firstRow = parseCSVRow(lines[0]);
+    const hasHeader = firstRow.some(isNaN);
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+    batchRows = dataLines.map(parseCSVRow);
+    document.getElementById("batch-row-count").textContent = `${batchRows.length} rows`;
+    batchBtn.disabled = false;
+    setChip(batchStatus, `${batchRows.length} rows loaded`, "");
+  });
+
+  batchBtn.addEventListener("click", async () => {
+    if (!batchRows) return;
+    setChip(batchStatus, "Running…", "warning");
+    batchBody.innerHTML = '<tr><td colspan="2" class="text-muted">Processing…</td></tr>';
+    try {
+      const invalid = batchRows.find(r => r.length !== EXPECTED || r.some(isNaN));
+      if (invalid) throw new Error(`Each row must have ${EXPECTED} numeric columns.`);
+      const chunks = [];
+      for (let i = 0; i < batchRows.length; i += 256) chunks.push(batchRows.slice(i, i + 256));
+      batchResultData = [];
+      for (const chunk of chunks) {
+        const res = await fetch(PREDICT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ features: chunk }),
+        });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
+        batchResultData.push(...payload.predictions);
+      }
+      batchBody.innerHTML = batchResultData.map((p, i) =>
+        `<tr><td>${i + 1}</td><td><span class="chip chip-soft">${labelClass(p)}</span></td></tr>`
+      ).join("");
+      batchDlBtn.classList.remove("d-none");
+      setChip(batchStatus, `${batchResultData.length} predictions`, "success");
+    } catch (err) {
+      batchBody.innerHTML = `<tr><td colspan="2" class="text-danger">${err.message}</td></tr>`;
+      setChip(batchStatus, "Error", "danger");
+    }
+  });
+
+  batchDlBtn.addEventListener("click", () => {
+    const csv = "row,predicted_class\n" + batchResultData.map((p, i) => `${i + 1},${labelClass(p)}`).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "predictions.csv"; a.click();
+  });
+
+  // ── EDF file ─────────────────────────────────────────────────────────
+  const edfFile = document.getElementById("edf-file");
+  const edfBtn = document.getElementById("edf-predict-btn");
+  const edfStatus = document.getElementById("edf-status");
+  const edfOutput = document.getElementById("edf-output");
+  const edfProgress = document.getElementById("edf-progress");
+
+  edfFile.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById("edf-file-name").textContent = file.name;
+    document.getElementById("edf-file-info").classList.remove("d-none");
+    edfBtn.disabled = false;
+    setChip(edfStatus, "File loaded", "");
+  });
+
+  edfBtn.addEventListener("click", async () => {
+    const file = edfFile.files[0];
+    if (!file) return;
+    setChip(edfStatus, "Processing…", "warning");
+    edfProgress.classList.remove("d-none");
+    edfBtn.disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(PREDICT_EDF_URL, { method: "POST", body: formData });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
+      // Map labels
+      if (payload.predictions) payload.predictions = payload.predictions.map(labelClass);
+      if (payload.predicted_class) payload.predicted_class = labelClass(payload.predicted_class);
+      edfOutput.textContent = JSON.stringify(payload, null, 2);
+      setChip(edfStatus, `${(payload.prediction_count || 0)} epochs`, "success");
+    } catch (err) {
+      edfOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
+      setChip(edfStatus, "Error", "danger");
+    } finally {
+      edfProgress.classList.add("d-none");
+      edfBtn.disabled = false;
+    }
+  });
+
+  // ── JSON editor ──────────────────────────────────────────────────────
+  const jsonStatus = document.getElementById("json-status");
+  const jsonOutput = document.getElementById("json-output");
+
+  document.getElementById("json-send-btn").addEventListener("click", async () => {
+    setChip(jsonStatus, "Sending…", "warning");
+    try {
+      const body = JSON.parse(document.getElementById("json-editor").value);
+      const res = await fetch(PREDICT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
+      if (payload.predicted_class !== undefined) payload.predicted_class = labelClass(payload.predicted_class);
+      if (payload.predictions) payload.predictions = payload.predictions.map(labelClass);
+      jsonOutput.textContent = JSON.stringify(payload, null, 2);
+      setChip(jsonStatus, "Done", "success");
+    } catch (err) {
+      jsonOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
+      setChip(jsonStatus, "Error", "danger");
+    }
+  });
+</script>
+{% endblock %}

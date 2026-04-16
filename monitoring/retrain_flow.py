@@ -5,11 +5,11 @@ Tự động retrain model khi phát hiện drift hoặc F1 drop.
 
 import os
 import subprocess
-from datetime import datetime
-from loguru import logger
+import re
+from pathlib import Path
 from prefect import flow, task, get_run_logger
-from prefect.blocks.system import Secret
 from dotenv import load_dotenv
+from monitoring.promote_rules import evaluate_run_and_promote
 
 load_dotenv()
 
@@ -37,6 +37,9 @@ def run_feature_engineering() -> str:
     pf_logger = get_run_logger()
     pf_logger.info("Running feature engineering on new data...")
 
+    features_dir = Path("data/features")
+    features_dir.mkdir(parents=True, exist_ok=True)
+
     result = subprocess.run(
         [
             "python", "feature_engineering/extract_features.py",
@@ -51,7 +54,7 @@ def run_feature_engineering() -> str:
         raise RuntimeError(f"Feature engineering failed:\n{result.stderr}")
 
     pf_logger.info("Feature engineering completed.")
-    features_path = f"s3://{S3_BUCKET}/features/features.parquet"
+    features_path = str(features_dir)
     return features_path
 
 
@@ -64,7 +67,7 @@ def run_training(features_path: str) -> str:
     result = subprocess.run(
         [
             "python", "training/train.py",
-            "--data-dir", f"s3://{S3_BUCKET}/features/",
+            "--data-dir", features_path,
             "--model-type", "xgboost",
         ],
         capture_output=True,
@@ -76,11 +79,10 @@ def run_training(features_path: str) -> str:
         raise RuntimeError(f"Training failed:\n{result.stderr}")
 
     pf_logger.info("Training completed.")
-    # Lấy run_id từ output
-    for line in result.stdout.split("\n"):
-        if "Run ID:" in line:
-            run_id = line.split("Run ID:")[-1].strip()
-            return run_id
+    # Lấy run_id từ output logger của training script.
+    match = re.search(r"Run ID:\s*([a-f0-9]{32})", result.stdout)
+    if match:
+        return match.group(1)
 
     return "unknown"
 
@@ -89,34 +91,20 @@ def run_training(features_path: str) -> str:
 def evaluate_and_promote(run_id: str) -> bool:
     """Kiểm tra F1 của model mới, nếu đạt → promote lên Staging."""
     pf_logger = get_run_logger()
-    import mlflow
-
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    client = mlflow.tracking.MlflowClient()
 
     if run_id == "unknown":
         pf_logger.warning("Could not determine run_id. Skipping promotion.")
         return False
 
-    run = client.get_run(run_id)
-    f1 = run.data.metrics.get("val_f1_weighted", 0.0)
-    pf_logger.info(f"New model F1: {f1:.4f} (threshold: {F1_PROMOTE_THRESHOLD})")
-
-    if f1 >= F1_PROMOTE_THRESHOLD:
-        # Tìm version mới nhất của model
-        versions = client.get_latest_versions(MLFLOW_MODEL_NAME, stages=["None"])
-        if versions:
-            version = versions[0].version
-            client.transition_model_version_stage(
-                name=MLFLOW_MODEL_NAME,
-                version=version,
-                stage="Staging",
-            )
-            pf_logger.info(f"Model v{version} promoted to Staging (F1={f1:.4f})")
-            return True
-    else:
-        pf_logger.warning(f"Model F1={f1:.4f} below threshold. Not promoting.")
-        return False
+    promoted, details = evaluate_run_and_promote(
+        run_id=run_id,
+        tracking_uri=MLFLOW_TRACKING_URI,
+        model_name=MLFLOW_MODEL_NAME,
+        threshold=F1_PROMOTE_THRESHOLD,
+        stage="Staging",
+    )
+    pf_logger.info(details)
+    return promoted
 
 
 @flow(name="sleep-disorder-retrain-pipeline", log_prints=True)

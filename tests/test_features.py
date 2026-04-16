@@ -6,6 +6,7 @@ import pytest
 import numpy as np
 import pandas as pd
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "sleep_portal.settings.development")
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-secret-key")
@@ -28,7 +29,7 @@ def sample_epoch():
 def sample_features():
     """Feature vector giả."""
     np.random.seed(42)
-    return np.random.randn(1, 50).astype(np.float32)
+    return np.random.randn(1, 24).astype(np.float32)
 
 
 # ─── Feature Extraction Tests ──────────────────────────────────────────────
@@ -72,10 +73,10 @@ class TestFeatureExtraction:
 
 class TestAnnotationParser:
     def test_stage_map_coverage(self):
-        from feature_engineering.annotation_parser import STAGE_MAP
-        assert "SLEEP-S0" in STAGE_MAP
-        assert "REM" in STAGE_MAP
-        assert STAGE_MAP["REM"] == 5
+        from feature_engineering.annotation_parser import EVENT_TO_STAGE
+        assert "SLEEP-S0" in EVENT_TO_STAGE
+        assert "SLEEP-REM" in EVENT_TO_STAGE
+        assert EVENT_TO_STAGE["SLEEP-REM"] == 5
 
     def test_get_epoch_labels_with_empty_df(self):
         from feature_engineering.annotation_parser import get_epoch_labels
@@ -105,3 +106,33 @@ class TestHealthCheckAPI:
             content_type="application/json",
         )
         assert response.status_code == 400
+
+    def test_predict_endpoint_supports_batch_predictions(self):
+        from django.test import Client
+
+        payload = {
+            "features": [
+                [float(index) for index in range(24)],
+                [float(index + 100) for index in range(24)],
+            ]
+        }
+
+        with patch(
+            "api.views.predict",
+            return_value={
+                "predicted_class": "healthy",
+                "predictions": ["healthy", "insomnia"],
+                "prediction_count": 2,
+                "class_counts": {"healthy": 1, "insomnia": 1},
+                "cached": False,
+            },
+        ):
+            response = Client().post(
+                "/api/v1/predict/",
+                data=payload,
+                content_type="application/json",
+            )
+
+        assert response.status_code == 200
+        assert response.json()["prediction_count"] == 2
+        assert response.json()["predictions"] == ["healthy", "insomnia"]

@@ -60,6 +60,7 @@ jobs:
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
+        continue-on-error: true
         with:
           files: ./coverage.xml
 
@@ -119,6 +120,29 @@ jobs:
             --force-new-deployment \
             --query 'service.deployments[0].status' \
             --output text
+
+      - name: Run Django migrate
+        env:
+          MIGRATE_OVERRIDES: >-
+            {"containerOverrides":[{"name":"sleep-portal","command":["python","manage.py","migrate","--noinput"]}]}
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task-definition sleep-portal-task \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-045cfee5dd9f717c9,subnet-05c7350c915514a4c],securityGroups=[sg-09b79fe4b58c9b329],assignPublicIp=ENABLED}" \
+            --overrides "$MIGRATE_OVERRIDES" \
+            --query "tasks[0].taskArn" --output text)
+          echo "Migrate task: $TASK_ARN"
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[0].exitCode" --output text)
+          echo "Migrate exit code: $EXIT_CODE"
+          [ "$EXIT_CODE" = "0" ] || exit 1
 
       - name: Notify deploy complete
         run: echo "Deployed image ${{ needs.build-and-push.outputs.image }} to ECS"

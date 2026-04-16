@@ -1,0 +1,67 @@
+name: Monitoring - Drift Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_data:
+        description: "Reference parquet path (local or s3://...)"
+        required: false
+        default: ""
+      current_data:
+        description: "Current parquet path (local or s3://...)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 3 * * 1"
+
+env:
+  AWS_REGION: ap-southeast-1
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install monitoring dependencies
+        run: |
+          pip install pandas pyarrow evidently==0.4.30 boto3 python-dotenv loguru
+
+      - name: Configure AWS credentials
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run drift detection
+        shell: bash
+        run: |
+          REF="${{ github.event.inputs.reference_data || vars.DRIFT_REFERENCE_DATA }}"
+          CUR="${{ github.event.inputs.current_data || vars.DRIFT_CURRENT_DATA }}"
+
+          if [ -z "$REF" ] || [ -z "$CUR" ]; then
+            echo "Missing reference/current data paths."
+            echo "Set workflow inputs or repository variables DRIFT_REFERENCE_DATA and DRIFT_CURRENT_DATA."
+            exit 0
+          fi
+
+          python monitoring/drift_detection.py \
+            --reference-data "$REF" \
+            --current-data "$CUR" \
+            --output-report reports/
+
+      - name: Upload drift reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-reports
+          path: reports/
+          if-no-files-found: ignore

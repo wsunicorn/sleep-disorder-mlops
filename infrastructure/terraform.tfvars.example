@@ -1,0 +1,32 @@
+# Terraform variable values for local development / CI.
+# DO NOT commit this file if it contains real secrets.
+# Copy to terraform.tfvars and fill in the blanks.
+
+aws_region     = "ap-southeast-1"
+aws_account_id = "651709558967"
+project        = "sleep-portal"
+
+# Network
+vpc_cidr             = "10.0.0.0/16"
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+
+# ECS
+task_cpu      = "512"
+task_memory   = "1024"
+desired_count = 1
+ecr_image_tag = "latest"
+
+# RDS
+db_instance_class    = "db.t3.micro"
+db_allocated_storage = 20
+db_name              = "sleep_portal"
+db_username          = "sleepAdmin"
+# db_password          = "CHANGE_ME"   # Set via TF_VAR_db_password
+
+# App
+# django_secret_key    = "CHANGE_ME"  # Set via TF_VAR_django_secret_key
+django_allowed_hosts = "*"
+
+# Notifications (optional)
+alarm_sns_arn = ""

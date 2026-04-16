@@ -5,6 +5,7 @@ So sánh phân phối features mới với baseline, phát hiện data drift.
 
 import os
 import argparse
+import json
 import pandas as pd
 import boto3
 from pathlib import Path
@@ -46,7 +47,12 @@ def run_drift_detection(reference_path: str, current_path: str, output_dir: str)
 
     # Chỉ lấy feature columns (bỏ metadata)
     meta_cols = ["epoch_index", "subject_id", "label"]
-    feature_cols = [c for c in reference_df.columns if c not in meta_cols]
+    reference_feature_cols = [c for c in reference_df.columns if c not in meta_cols]
+    current_feature_cols = [c for c in current_df.columns if c not in meta_cols]
+    feature_cols = [c for c in reference_feature_cols if c in current_feature_cols]
+
+    if not feature_cols:
+        raise ValueError("No common feature columns found between reference and current data")
 
     ref_features = reference_df[feature_cols]
     cur_features = current_df[feature_cols]
@@ -79,14 +85,21 @@ def run_drift_detection(reference_path: str, current_path: str, output_dir: str)
     logger.info(f"Drift detected: {drift_detected}")
     logger.info(f"Share of drifted features: {drift_share:.2%}")
 
-    return {
+    summary = {
         "drift_detected": drift_detected,
         "drift_share": drift_share,
         "report_path": str(report_path),
         "n_reference": len(ref_features),
         "n_current": len(cur_features),
+        "n_features": len(feature_cols),
         "alert": drift_share > DRIFT_THRESHOLD,
     }
+
+    summary_path = output_dir / f"drift_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    logger.info(f"Summary saved: {summary_path}")
+
+    return summary
 
 
 def main():

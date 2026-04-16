@@ -1,0 +1,35 @@
+{
+  "best_model": "LightGBM",
+  "model_name": "sleep-disorder-classifier",
+  "classes": [
+    "healthy",
+    "insomnia",
+    "narcolepsy",
+    "nfle",
+    "plm",
+    "rbd",
+    "sdb"
+  ],
+  "n_features": 24,
+  "val_f1": 0.5929,
+  "val_accuracy": 0.5908,
+  "sfreq": 512,
+  "window_samples": 1024,
+  "device": "cuda",
+  "run_id": "60c4027361bc40ab858f110e22210adc",
+  "model_file": "model.pkl",
+  "all_results": {
+    "XGBoost": {
+      "f1": 0.584,
+      "acc": 0.5814
+    },
+    "LightGBM": {
+      "f1": 0.5929,
+      "acc": 0.5908
+    },
+    "RandomForest": {
+      "f1": 0.5841,
+      "acc": 0.5855
+    }
+  }
+}

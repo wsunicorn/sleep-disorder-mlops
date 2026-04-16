@@ -22,9 +22,14 @@ data/features/*
 !.dvc/config
 !.dvc
 
-# MLflow
+# MLflow — tracked locally, too large for Git
 mlruns/
 mlartifacts/
+
+# Model binaries — large binary files, use DVC or download separately
+models/*.pkl
+models/*.ubj
+models/*.bin
 
 # Django
 sleep_portal/staticfiles/

@@ -1,0 +1,54 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Patient Cohort{% endblock %}
+
+{% block content %}
+<section class="section-card mb-4">
+  <div class="section-heading">
+    <div>
+      <span class="eyebrow">Cohort navigator</span>
+      <h1 class="page-title">Patient roster</h1>
+    </div>
+    <span class="chip">{{ total_patients }} patients</span>
+  </div>
+  <div class="row g-3 mb-4">
+    {% for item in diagnosis_breakdown %}
+    <div class="col-md-4 col-xl-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Diagnosis</span>
+        <strong>{{ item.diagnosis }}</strong>
+        <p>{{ item.count }} patient{{ item.count|pluralize }}</p>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="table-responsive">
+    <table class="table table-theme align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Patient ID</th>
+          <th>Diagnosis</th>
+          <th>Age</th>
+          <th>Gender</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for patient in patients %}
+        <tr>
+          <td>{{ patient.patient_id }}</td>
+          <td><span class="chip chip-soft">{{ patient.diagnosis }}</span></td>
+          <td>{{ patient.age|default:"-" }}</td>
+          <td>{{ patient.gender|default:"-" }}</td>
+          <td>{{ patient.created_at|date:"d M Y" }}</td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-dark btn-pill" href="{% url 'patient_detail' patient.patient_id %}">View timeline</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-muted">No patient records available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Patient {{ patient.patient_id }}{% endblock %}
+
+{% block content %}
+<section class="section-card mb-4">
+  <div class="section-heading">
+    <div>
+      <span class="eyebrow">Patient detail</span>
+      <h1 class="page-title">{{ patient.patient_id }}</h1>
+    </div>
+    <a class="btn btn-outline-dark btn-pill" href="{% url 'patient_list' %}">Back to patient roster</a>
+  </div>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="metric-card h-100">
+        <span class="metric-label">Diagnosis</span>
+        <h2>{{ patient.diagnosis }}</h2>
+        <p>Primary label stored for this patient profile.</p>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="metric-card h-100">
+        <span class="metric-label">Epoch count</span>
+        <h2>{{ n_epochs }}</h2>
+        <p>Total epoch-level predictions available for review.</p>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="metric-card h-100">
+        <span class="metric-label">Average confidence</span>
+        <h2>{{ average_confidence|floatformat:2 }}</h2>
+        <p>{% if latest_prediction %}Latest class: {{ latest_prediction.predicted_class }}{% else %}No predictions logged yet.{% endif %}</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-card">
+  <div class="section-heading">
+    <div>
+      <span class="eyebrow">Epoch timeline</span>
+      <h3>Prediction trace</h3>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-theme align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Epoch</th>
+          <th>Predicted class</th>
+          <th>Confidence</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for prediction in predictions %}
+        <tr>
+          <td>{{ prediction.epoch_index }}</td>
+          <td><span class="chip chip-soft">{{ prediction.predicted_class }}</span></td>
+          <td>{{ prediction.confidence|default:"-"|floatformat:2 }}</td>
+          <td>{{ prediction.timestamp|date:"d M Y H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-muted">No epoch predictions stored for this patient.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

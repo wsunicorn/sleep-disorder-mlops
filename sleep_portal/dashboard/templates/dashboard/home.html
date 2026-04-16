@@ -1,56 +1,161 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>Sleep Disorder Detection Portal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-<nav class="navbar navbar-dark bg-dark mb-4">
-  <div class="container">
-    <span class="navbar-brand fw-bold">Sleep Disorder Detection — MLOps</span>
-  </div>
-</nav>
-<div class="container">
-  <div class="row mb-4">
-    <div class="col-md-4">
-      <div class="card text-white bg-primary">
-        <div class="card-body">
-          <h5 class="card-title">Total Patients</h5>
-          <p class="display-4">{{ total_patients }}</p>
+{% extends "dashboard/base.html" %}
+
+{% block title %}Sleep Portal — Overview{% endblock %}
+
+{% block content %}
+<section class="hero-panel mb-4">
+  <div class="row g-4 align-items-end">
+    <div class="col-lg-8">
+      <span class="eyebrow">Sleep Disorder Detection Platform</span>
+      <h1 class="hero-title">MLOps pipeline for automated sleep analysis.</h1>
+      <p class="hero-copy">
+        Real-time EEG inference, patient cohort monitoring, and automated retraining — all in one place.
+      </p>
+      <div class="d-flex flex-wrap gap-2 mt-4">
+        <a class="btn btn-light btn-pill" href="{% url 'predict_page' %}">Run prediction</a>
+        <a class="btn btn-outline-light btn-pill" href="{% url 'patient_list' %}">View patients</a>
+        <a class="btn btn-outline-light btn-pill" href="{% url 'pipeline_page' %}">Pipeline status</a>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="status-stack">
+        <div class="status-panel">
+          <span class="status-label">Model</span>
+          <strong>{{ model_name }}</strong>
+          <span class="status-meta">Stage: {{ model_stage }}</span>
+        </div>
+        <div class="status-panel">
+          <span class="status-label">Health</span>
+          <strong><a href="/api/v1/health/" target="_blank" rel="noreferrer">/api/v1/health/</a></strong>
+          <span class="status-meta">Live check</span>
         </div>
       </div>
     </div>
   </div>
+</section>
 
-  <h4>Diagnosis Distribution</h4>
-  <table class="table table-striped table-bordered">
-    <thead class="table-dark">
-      <tr><th>Diagnosis</th><th>Count</th></tr>
-    </thead>
-    <tbody>
-      {% for diagnosis, count in diagnosis_counts.items %}
-      <tr><td>{{ diagnosis }}</td><td>{{ count }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<!-- KPI metrics row -->
+<section class="metrics-grid mb-4">
+  <article class="metric-card metric-primary">
+    <span class="metric-label">Patients in cohort</span>
+    <h2>{{ total_patients }}</h2>
+    <p>Curated cases across all diagnoses.</p>
+  </article>
+  <article class="metric-card">
+    <span class="metric-label">Predicted epochs</span>
+    <h2>{{ total_predictions }}</h2>
+    <p>Stored epoch-level classifications.</p>
+  </article>
+  <article class="metric-card">
+    <span class="metric-label">Monitored patients</span>
+    <h2>{{ monitored_patients }}</h2>
+    <p>With at least one prediction on record.</p>
+  </article>
+  <article class="metric-card">
+    <span class="metric-label">Avg confidence</span>
+    <h2>{{ average_confidence|floatformat:2 }}</h2>
+    <p>Mean confidence across stored predictions.</p>
+  </article>
+</section>
 
-  <h4 class="mt-4">Patients</h4>
-  <table class="table table-hover">
-    <thead><tr><th>ID</th><th>Diagnosis</th><th>Age</th><th>Gender</th><th></th></tr></thead>
-    <tbody>
-      {% for p in patients %}
-      <tr>
-        <td>{{ p.patient_id }}</td>
-        <td>{{ p.diagnosis }}</td>
-        <td>{{ p.age|default:"-" }}</td>
-        <td>{{ p.gender|default:"-" }}</td>
-        <td><a href="{% url 'patient_detail' p.patient_id %}" class="btn btn-sm btn-outline-primary">View</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="row g-4 mb-4">
+  <!-- Diagnosis distribution -->
+  <div class="col-xl-5">
+    <section class="section-card h-100">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Clinical mix</span>
+          <h3>Diagnosis distribution</h3>
+        </div>
+        <a class="btn btn-outline-dark btn-sm btn-pill" href="{% url 'patient_list' %}">All patients</a>
+      </div>
+      <div class="distribution-list">
+        {% for item in diagnosis_breakdown %}
+        <div class="distribution-row">
+          <div class="distribution-copy">
+            <strong>{{ item.name }}</strong>
+            <span>{{ item.count }} cases</span>
+          </div>
+          <div class="distribution-bar-shell">
+            <div class="distribution-bar" style="width: {{ item.percentage|floatformat:2 }}%;"></div>
+          </div>
+        </div>
+        {% empty %}
+        <p class="empty-state">No patient records available yet.</p>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="col-xl-7">
+    <section class="section-card h-100">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Quick access</span>
+          <h3>Core features</h3>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <a class="ops-card ops-card-link" href="{% url 'predict_page' %}">
+            <span class="ops-icon">🔬</span>
+            <span class="ops-label">Single prediction</span>
+            <strong>Inference Studio</strong>
+            <p>Paste feature vectors or upload CSV/EDF files for instant sleep stage or disorder prediction.</p>
+          </a>
+        </div>
+        <div class="col-md-6">
+          <a class="ops-card ops-card-link" href="{% url 'patient_list' %}">
+            <span class="ops-icon">👥</span>
+            <span class="ops-label">Patient management</span>
+            <strong>Patient Roster</strong>
+            <p>Browse all patients, filter by diagnosis, and review individual epoch timelines.</p>
+          </a>
+        </div>
+        <div class="col-md-6">
+          <a class="ops-card ops-card-link" href="{% url 'pipeline_page' %}">
+            <span class="ops-icon">⚙️</span>
+            <span class="ops-label">MLOps</span>
+            <strong>Pipeline Status</strong>
+            <p>Check model registry stage, CI/CD workflows, drift detection, and retraining readiness.</p>
+          </a>
+        </div>
+        <div class="col-md-6">
+          <a class="ops-card ops-card-link" href="/api/v1/model-info/" target="_blank" rel="noreferrer">
+            <span class="ops-icon">📊</span>
+            <span class="ops-label">REST API</span>
+            <strong>Model Info</strong>
+            <p>Live metadata for the currently served model. See feature count, stage, and readiness.</p>
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>
-</body>
-</html>
+
+<!-- Recent activity -->
+<section class="section-card">
+  <div class="section-heading">
+    <div>
+      <span class="eyebrow">Activity feed</span>
+      <h3>Recent epoch predictions</h3>
+    </div>
+  </div>
+  <div class="activity-list">
+    {% for prediction in recent_predictions %}
+    <article class="activity-row">
+      <div>
+        <strong>{{ prediction.patient.patient_id }}</strong>
+        <p>Epoch {{ prediction.epoch_index }} classified as
+          <span class="chip chip-soft">{{ prediction.predicted_class }}</span>
+        </p>
+      </div>
+      <span class="activity-meta">{{ prediction.timestamp|date:"d M Y H:i" }}</span>
+    </article>
+    {% empty %}
+    <p class="empty-state">No epoch predictions stored yet. Use the <a href="{% url 'predict_page' %}">Inference Studio</a> to generate predictions.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
