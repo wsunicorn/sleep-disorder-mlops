@@ -47,6 +47,339 @@ Hệ thống MLOps end-to-end phát hiện **7 loại rối loạn giấc ngủ*
 
 ---
 
+## Cách hệ thống hoạt động — Giải thích chi tiết
+
+### Tổng quan luồng dữ liệu
+
+```
+[Thiết bị EEG IoT]
+        │  Tín hiệu EEG thô (sine waves tổng hợp, 512 Hz)
+        │  → Tính 24 features (FFT + thống kê thời gian)
+        ▼
+POST /api/v1/predict/        ← HTTP JSON request
+        │  Django nhận features, kiểm tra Redis cache
+        │  Cache miss → LightGBM model.predict()
+        │  → Trả về predicted_class (e.g. "insomnia")
+        ▼
+POST /api/v1/ingest/         ← Lưu kết quả vào DB
+        │  Django upsert Patient + EpochPrediction
+        │  → PostgreSQL (AWS RDS production)
+        ▼
+[Web Dashboard]
+        │  /patients/            → Danh sách bệnh nhân
+        │  /patients/<id>/       → Sleep timeline chart
+        │  /                     → Thống kê + biểu đồ
+        ▼
+[Monitoring — hàng tuần]
+        │  Evidently AI so sánh features mới vs baseline
+        │  Drift > 30% → Prefect trigger retrain
+        └─ MLflow log metrics → Promote nếu F1 ≥ 0.80
+```
+
+---
+
+### Tầng 1 — IoT Simulation (Layer 1)
+
+**File:** `iot_simulation/multi_patient_demo.py`
+
+Mô phỏng 5 thiết bị EEG gắn trên bệnh nhân, gửi dữ liệu **đồng thời (song song)** về server.
+
+**Cách hoạt động từng bước:**
+
+**Bước 1 — Sinh tín hiệu EEG tổng hợp**
+
+Mỗi bệnh nhân được gán một `DISORDER_PROFILE` — tỉ lệ công suất các băng tần đặc trưng cho bệnh lý:
+
+```python
+DISORDER_PROFILES = {
+    "insomnia":   {"delta": 0.10, "theta": 0.30, "alpha": 0.40, ...},  # nhiều alpha = mất ngủ
+    "narcolepsy": {"delta": 0.50, "theta": 0.20, ...},                  # nhiều delta = buồn ngủ
+    "healthy":    {"delta": 0.30, "alpha": 0.30, ...},                  # cân bằng
+}
+```
+
+Code tạo tín hiệu bằng cách cộng các sóng sin ở các tần số đại diện cho từng băng (delta=2Hz, theta=6Hz, alpha=10Hz, beta=20Hz, gamma=35Hz) với biên độ theo profile, cộng thêm nhiễu Gaussian.
+
+**Bước 2 — Trích xuất 24 features từ cửa sổ 2 giây (1024 mẫu)**
+
+Dùng **Welch's method** (FFT từng đoạn nhỏ, lấy trung bình) để tính Power Spectral Density (PSD), sau đó:
+
+| Nhóm | Features | Cách tính |
+|---|---|---|
+| Band Power | delta_power, theta_power, alpha_power, beta_power, gamma_power | `∫ PSD(f) df` trên từng dải tần |
+| Relative Power | delta_rel, theta_rel, ... | `band_power / total_power` |
+| Spectral | spectral_entropy, peak_frequency, mean_frequency | Shannon entropy của PSD; argmax; weighted mean |
+| Time-domain | amplitude_mean, amplitude_std, rms | Thống kê biên độ trực tiếp |
+| Ratio | delta_beta_ratio, theta_alpha_ratio | Chỉ số buồn ngủ / ngủ gật |
+| Statistical | skewness, kurtosis, zero_crossing_rate | Hình dạng phân phối tín hiệu |
+| Hjorth | hjorth_activity, hjorth_mobility, hjorth_complexity | Đo độ phức tạp sóng não |
+
+**Bước 3 — Gửi lên server AWS**
+
+```
+POST /api/v1/predict/  →  {"features": [[f0, f1, ..., f23]]}
+POST /api/v1/ingest/   →  {"patient_id": "PT-001", "disorder": "insomnia", "epochs": [...]}
+```
+
+5 bệnh nhân chạy song song qua `ThreadPoolExecutor` — mỗi thread là 1 "thiết bị IoT".
+
+---
+
+### Tầng 2 — Training Pipeline (Layer 2)
+
+**Files:** `feature_engineering/`, `training/train.py`, `notebooks/kaggle_cap_training.ipynb`
+
+**Dataset:** CAP Sleep Database (PhysioNet) — ~140,000 epochs EEG từ 108 bản ghi giấc ngủ thực tế của bệnh nhân mắc 7 loại rối loạn.
+
+**Quy trình huấn luyện:**
+
+```
+EDF files (PhysioNet)
+    │
+    ▼  [annotation_parser.py]
+    │  Đọc file .edf + .eannot, ghép nhãn giấc ngủ (healthy/insomnia/nfle/...)
+    ▼  [extract_features.py]
+    │  Cắt thành cửa sổ 30 giây → FFT → 24 features/epoch
+    │  Lưu ra dataset_labeled.parquet
+    ▼  [train.py]
+    │  So sánh 3 model: XGBoost / LightGBM / RandomForest
+    │  Class weighting (balanced) — xử lý mất cân bằng nhãn
+    │  Log metrics + artifacts vào MLflow
+    ▼  [register_model.py]
+    │  Model tốt nhất → MLflow Model Registry
+    │  → stage "None" → "Staging" → "Production"
+```
+
+**Tại sao chọn LightGBM?**
+
+LightGBM thắng vì: tốc độ train nhanh hơn XGBoost (histogram-based gradient boosting), xử lý tốt dữ liệu mất cân bằng nhãn, F1=0.5929 trên tập test.
+
+**MLflow tracking** lưu lại toàn bộ: params, metrics (F1, accuracy), model artifact, feature names — cho phép so sánh và tái hiện mọi thí nghiệm.
+
+---
+
+### Tầng 3 — Serving & Deployment (Layer 3)
+
+#### 3.1 — Django Web Application
+
+**Cấu trúc Django:**
+
+```
+sleep_portal/
+├── api/views.py         ← REST endpoints (PredictView, IngestView, ...)
+├── dashboard/views.py   ← HTML page views (home, patients, predict, pipeline)
+├── inference/predictor.py ← Model singleton + Redis cache
+└── dashboard/models.py  ← Patient, EpochPrediction (ORM → PostgreSQL)
+```
+
+**Luồng xử lý 1 request predict:**
+
+```
+Client gửi POST /api/v1/predict/
+    │
+    ▼  [api/views.py — PredictView.post()]
+    │  1. Validate input qua PredictRequestSerializer
+    │  2. Convert features → numpy array float32
+    │
+    ▼  [inference/predictor.py — predict()]
+    │  3. Tạo cache key = SHA-256 hash của features bytes
+    │  4. Kiểm tra Redis cache → nếu hit: trả về ngay (cached=True)
+    │  5. Cache miss → _get_model() lấy model singleton
+    │     - Thử load từ MLflow Registry (mlruns/ local)
+    │     - Fallback → load model.pkl trực tiếp
+    │  6. model.predict(DataFrame(features)) → raw integer labels
+    │  7. LabelEncoder.inverse_transform() → class names ["insomnia", ...]
+    │  8. Lưu kết quả vào Redis (TTL 1 giờ)
+    │
+    ▼  Trả về JSON: {predicted_class, predictions, class_counts, cached}
+```
+
+**Tại sao dùng Redis cache?**
+
+Cùng 1 cửa sổ EEG (cùng 24 giá trị feature) sẽ cho cùng kết quả → hash features → cache kết quả → tiết kiệm CPU khi cùng epoch được gửi lại nhiều lần (ví dụ retry từ IoT device).
+
+#### 3.2 — Docker Multi-stage Build
+
+```dockerfile
+# Stage 1: Builder — cài pip packages
+FROM python:3.11-slim AS builder
+RUN pip install --user -r requirements-prod.txt
+
+# Stage 2: Production — chỉ copy những gì cần
+FROM python:3.11-slim
+COPY --from=builder /root/.local /opt/app-packages  # packages đã cài
+COPY sleep_portal/ .    # Django app
+COPY models/ ./models/  # model.pkl, label_encoder.pkl, feature_names.json
+RUN python manage.py collectstatic --noinput  # CSS/JS → /static/
+CMD ["gunicorn", ..., "--workers", "2", "--threads", "4"]
+```
+
+Multi-stage giúp image nhỏ hơn vì stage 1 có gcc/libpq-dev (compiler) nhưng stage 2 chỉ copy binary packages đã build sẵn.
+
+#### 3.3 — AWS Infrastructure
+
+```
+Internet
+    │
+    ▼  [AWS ALB — Application Load Balancer]
+    │  Port 80, health check /api/v1/health/
+    │  Round-robin → ECS tasks
+    │
+    ▼  [AWS ECS Fargate — sleep-portal-service]
+    │  Docker container chạy Gunicorn (2 workers × 4 threads)
+    │  0.5 vCPU, 1 GB RAM, region ap-southeast-1
+    │  Không cần quản lý EC2 instances
+    │
+    ├─ [AWS RDS PostgreSQL]  ← Patient, EpochPrediction data
+    │
+    ├─ [AWS ElastiCache Redis]  ← Prediction cache (TTL 1h)
+    │
+    └─ [AWS S3 — sleep-mlops-651709]  ← model.pkl, training data, DVC store
+```
+
+#### 3.4 — CI/CD với GitHub Actions
+
+**File:** `.github/workflows/ci.yml`
+
+```
+git push origin main
+    │
+    ▼  Job 1: test
+    │  - Khởi động PostgreSQL + Redis service containers
+    │  - pip install requirements.txt + requirements-dev.txt
+    │  - pytest tests/ -v --cov (41 tests: API × 20, features × 9, inference × 12)
+    │  - Upload coverage report lên Codecov
+    │
+    ▼  Job 2: build-and-push (chỉ chạy nếu test pass)
+    │  - Configure AWS credentials từ GitHub Secrets
+    │  - aws s3 cp model.pkl từ S3 vào models/ (model không được commit vào git)
+    │  - docker build -f docker/Dockerfile → image với model embedded
+    │  - docker push lên ECR với 2 tags: commit SHA + latest
+    │
+    ▼  Job 3: deploy
+       - aws ecs update-service --force-new-deployment
+       - ECS kéo image mới từ ECR → rolling update (zero-downtime)
+       - Chạy migrate task để update DB schema nếu có migration mới
+```
+
+---
+
+### Tầng 4 — Monitoring & Retraining (Layer 4)
+
+**Files:** `monitoring/drift_detection.py`, `monitoring/retrain_flow.py`, `.github/workflows/monitoring.yml`
+
+#### 4.1 — Data Drift Detection (Evidently AI)
+
+Hàng tuần (cron Monday 3AM UTC), GitHub Actions chạy:
+
+```python
+# drift_detection.py
+reference_df = load_parquet("s3://sleep-mlops-651709/features/baseline.parquet")
+current_df   = load_parquet("s3://sleep-mlops-651709/features/recent.parquet")
+
+report = Report(metrics=[DataDriftPreset(), DataQualityPreset()])
+report.run(reference_data=reference_df, current_data=current_df)
+# → HTML report + JSON summary
+# drift_share = tỉ lệ features bị drift (Kolmogorov-Smirnov test)
+```
+
+**Evidently AI** so sánh phân phối thống kê của từng feature (KS-test, p-value < 0.05 = drift). Nếu > 30% features bị drift → data đã thay đổi đủ để model có thể kém hiệu quả.
+
+#### 4.2 — Tự động Retrain (Prefect)
+
+```python
+# retrain_flow.py — Prefect flow
+@flow
+def retrain_pipeline():
+    if check_drift_threshold(drift_share=0.35, f1_current=0.72):  # cần retrain
+        features_path = run_feature_engineering()   # extract lại features từ data mới
+        run_id = train_model(features_path)          # train LightGBM mới, log vào MLflow
+        f1 = get_run_f1(run_id)
+        if f1 >= 0.80:                               # model mới đủ tốt
+            promote_model(run_id)                    # promote lên "Production" trong MLflow Registry
+            redeploy_ecs()                           # trigger deploy image mới
+```
+
+**Prefect** là orchestration tool — quản lý retry, logging, scheduling cho pipeline. Mỗi `@task` có thể retry độc lập nếu fail.
+
+#### 4.3 — CloudWatch Monitoring
+
+Terraform tạo sẵn CloudWatch Alarms:
+- **5xx Error Rate** > 5% trong 5 phút → SNS notification
+- **Response Latency p99** > 2 giây → cảnh báo
+- **ECS CPU** > 80% trong 10 phút → xem xét scale up
+
+---
+
+### Giải thích các công nghệ
+
+| Công nghệ | Vai trò | Tại sao dùng |
+|---|---|---|
+| **Python 3.11** | Ngôn ngữ chính | Ecosystem ML phong phú (numpy, scipy, sklearn) |
+| **Django 4.2** | Web framework | ORM mạnh, admin panel, template engine, REST Framework |
+| **Django REST Framework** | API layer | Serializer validation, content negotiation, browsable API |
+| **LightGBM** | ML model | Nhanh, hiệu quả, xử lý tốt class imbalance, F1=0.59 |
+| **MLflow** | Model tracking & registry | Lưu experiments, version models, reproduce results |
+| **NumPy + SciPy** | Feature extraction | FFT (Welch), band power, statistical features |
+| **MNE-Python** | EEG processing | Đọc .edf files, bandpass filter, epoch processing |
+| **Redis** | Prediction cache | SHA-256 hash → cache kết quả giống nhau, giảm latency |
+| **PostgreSQL** | Database | ACID transactions, lưu Patient + EpochPrediction |
+| **Gunicorn** | WSGI server | Production-grade, multi-worker, thread-safe |
+| **Docker** | Containerization | Package app + model + dependencies thành 1 image |
+| **AWS ECR** | Container registry | Lưu Docker images, tích hợp với ECS |
+| **AWS ECS Fargate** | Container hosting | Serverless containers — không cần quản lý EC2 |
+| **AWS ALB** | Load balancer | HTTPS termination, health checks, routing |
+| **AWS RDS** | Managed PostgreSQL | Backup tự động, multi-AZ, không quản lý server |
+| **AWS S3** | Object storage | Model artifacts, training data, DVC store |
+| **GitHub Actions** | CI/CD | Automated test → build → deploy mỗi khi push |
+| **Terraform** | Infrastructure as Code | Provision toàn bộ AWS infra từ code, reproducible |
+| **Evidently AI** | Data drift detection | Statistical tests (KS-test) so sánh feature distributions |
+| **Prefect** | ML pipeline orchestration | Retry logic, task dependency, scheduling retraining |
+| **Chart.js** | Frontend visualization | Sleep timeline, class distribution charts |
+| **WhiteNoise** | Static files | Serve CSS/JS trực tiếp từ Gunicorn (không cần Nginx) |
+| **DVC** | Data version control | Track large data files qua S3, reproducible datasets |
+
+---
+
+### Ví dụ cụ thể: Một epoch EEG đi qua hệ thống
+
+```
+T=0ms   IoT device đo 2 giây EEG của bệnh nhân PT-001
+        signal = 1024 số float (512 Hz × 2s)
+
+T=1ms   Tính PSD bằng Welch's method (numpy FFT)
+        → delta_power=0.0025, theta_power=0.0018, alpha_power=0.0041, ...
+        → 24 features tổng cộng
+
+T=2ms   POST http://alb.../api/v1/predict/
+        Body: {"features": [[0.0025, 0.0018, 0.0041, ...]]}
+
+T=15ms  Django nhận request, validate bằng PredictRequestSerializer
+        Tính SHA-256 của features bytes → cache_key="pred:a3f8..."
+        Redis GET cache_key → None (cache miss)
+
+T=16ms  LightGBM model.predict(DataFrame([[0.0025, ...]]))
+        → raw prediction: [2]  (integer label)
+        LabelEncoder.inverse_transform([2]) → ["insomnia"]
+
+T=17ms  Redis SET cache_key = {predicted_class: "insomnia", ...} TTL=3600s
+        Response: {"predicted_class": "insomnia", "cached": false}
+
+T=18ms  POST /api/v1/ingest/
+        Body: {patient_id: "PT-001", disorder: "insomnia",
+               epochs: [{epoch_index: 0, predicted_class: "insomnia"}]}
+
+T=25ms  Django upsert Patient(patient_id="PT-001") → PostgreSQL
+        Django upsert EpochPrediction(epoch_index=0, predicted_class="insomnia")
+
+[Sau đó, trên web dashboard]
+        GET /patients/PT-001/ → query EpochPrediction.objects.filter(patient=PT-001)
+        → render sleep timeline chart với Chart.js
+        → hiển thị "Mất ngủ" (tiếng Việt) trên giao diện
+```
+
+---
+
 ## Model hiện tại
 
 | Thuộc tính | Giá trị |
