@@ -27,7 +27,6 @@ ENV PATH=/opt/app-packages/bin:$PATH
 ENV PYTHONPATH=/opt/app-packages/lib/python3.11/site-packages
 
 COPY sleep_portal/ .
-COPY mlruns/ ./mlruns/
 COPY models/ ./models/
 
 ENV DJANGO_SETTINGS_MODULE=sleep_portal.settings.production

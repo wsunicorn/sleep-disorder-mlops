@@ -82,6 +82,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Download model artifacts from S3
+        run: |
+          mkdir -p models
+          aws s3 cp s3://sleep-mlops-651709/models/model.pkl models/model.pkl || echo "model.pkl not in S3, skipping"
+          aws s3 cp s3://sleep-mlops-651709/models/model.ubj models/model.ubj || echo "model.ubj not in S3, skipping"
+          ls -lh models/
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
