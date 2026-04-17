@@ -1,46 +1,100 @@
 {% extends "dashboard/base.html" %}
 
-{% block title %}Patient {{ patient.patient_id }}{% endblock %}
+{% block title %}Bệnh nhân {{ patient.patient_id }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
 
 {% block content %}
 <section class="section-card mb-4">
   <div class="section-heading">
     <div>
-      <span class="eyebrow">Patient detail</span>
+      <span class="eyebrow">Chi tiết bệnh nhân</span>
       <h1 class="page-title">{{ patient.patient_id }}</h1>
     </div>
-    <a class="btn btn-outline-dark btn-pill" href="{% url 'patient_list' %}">Back to patient roster</a>
+    <a class="btn btn-outline-dark btn-pill" href="{% url 'patient_list' %}">← Về danh sách</a>
   </div>
   <div class="row g-3">
-    <div class="col-md-4">
+    <div class="col-md-3">
       <div class="metric-card h-100">
-        <span class="metric-label">Diagnosis</span>
-        <h2>{{ patient.diagnosis }}</h2>
-        <p>Primary label stored for this patient profile.</p>
+        <span class="metric-label">Chẩn đoán</span>
+        <h2 style="font-size:1.3rem">{{ patient.diagnosis }}</h2>
+        <p>Nhãn chính đã lưu cho hồ sơ bệnh nhân.</p>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       <div class="metric-card h-100">
-        <span class="metric-label">Epoch count</span>
+        <span class="metric-label">Số epoch</span>
         <h2>{{ n_epochs }}</h2>
-        <p>Total epoch-level predictions available for review.</p>
+        <p>Tổng số epoch đã dự đoán.</p>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       <div class="metric-card h-100">
-        <span class="metric-label">Average confidence</span>
+        <span class="metric-label">Độ tin cậy TB</span>
         <h2>{{ average_confidence|floatformat:2 }}</h2>
-        <p>{% if latest_prediction %}Latest class: {{ latest_prediction.predicted_class }}{% else %}No predictions logged yet.{% endif %}</p>
+        <p>{% if latest_prediction %}Gần nhất: <strong>{{ latest_prediction.predicted_class }}</strong>{% else %}Chưa có dự đoán.{% endif %}</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="metric-card h-100">
+        <span class="metric-label">Tuổi / Giới tính</span>
+        <h2 style="font-size:1.3rem">{{ patient.age|default:"—" }} / {% if patient.gender == "M" %}Nam{% elif patient.gender == "F" %}Nữ{% else %}{{ patient.gender|default:"—" }}{% endif %}</h2>
+        <p>Ngày tạo: {{ patient.created_at|date:"d/m/Y" }}</p>
       </div>
     </div>
   </div>
 </section>
 
+{% if n_epochs > 0 %}
+<!-- Sleep visualization charts -->
+<div class="row g-4 mb-4">
+  <div class="col-xl-8">
+    <section class="section-card h-100">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Biểu đồ dòng thời gian</span>
+          <h3>Quá trình giấc ngủ theo từng epoch</h3>
+        </div>
+      </div>
+      <div style="position:relative;height:260px">
+        <canvas id="sleepTimelineChart"></canvas>
+      </div>
+      <p style="font-size:0.8rem;color:var(--ink-soft);margin-top:0.5rem">
+        Trục Y: chỉ số lớp rối loạn. Trục X: thứ tự epoch theo thời gian.
+      </p>
+    </section>
+  </div>
+  <div class="col-xl-4">
+    <section class="section-card h-100">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Phân bố dự đoán</span>
+          <h3>Tỷ lệ các lớp</h3>
+        </div>
+      </div>
+      <div style="position:relative;height:200px">
+        <canvas id="classPieChart"></canvas>
+      </div>
+      <div class="mt-3">
+        {% for cls, cnt in class_distribution.items %}
+        <div class="d-flex justify-content-between align-items-center mb-1" style="font-size:0.85rem">
+          <span class="chip chip-soft">{{ cls }}</span>
+          <span>{{ cnt }} epoch</span>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endif %}
+
 <section class="section-card">
   <div class="section-heading">
     <div>
-      <span class="eyebrow">Epoch timeline</span>
-      <h3>Prediction trace</h3>
+      <span class="eyebrow">Dòng thời gian epoch</span>
+      <h3>Chi tiết từng epoch</h3>
     </div>
   </div>
   <div class="table-responsive">
@@ -48,9 +102,9 @@
       <thead>
         <tr>
           <th>Epoch</th>
-          <th>Predicted class</th>
-          <th>Confidence</th>
-          <th>Timestamp</th>
+          <th>Lớp dự đoán</th>
+          <th>Độ tin cậy</th>
+          <th>Thời gian</th>
         </tr>
       </thead>
       <tbody>
@@ -58,14 +112,89 @@
         <tr>
           <td>{{ prediction.epoch_index }}</td>
           <td><span class="chip chip-soft">{{ prediction.predicted_class }}</span></td>
-          <td>{{ prediction.confidence|default:"-"|floatformat:2 }}</td>
-          <td>{{ prediction.timestamp|date:"d M Y H:i" }}</td>
+          <td>{{ prediction.confidence|default:"—"|floatformat:2 }}</td>
+          <td>{{ prediction.timestamp|date:"d/m/Y H:i:s" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="4" class="text-muted">No epoch predictions stored for this patient.</td></tr>
+        <tr><td colspan="4" class="text-muted">Chưa có dữ liệu epoch cho bệnh nhân này.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+{% if n_epochs > 0 %}
+<script>
+(function(){
+  const CLASS_MAP = {"healthy":0,"insomnia":1,"narcolepsy":2,"nfle":3,"plm":4,"rbd":5,"sdb":6};
+  const CLASS_COLORS = {"healthy":"#2a9d8f","insomnia":"#e76f51","narcolepsy":"#bc6c25","nfle":"#264653","plm":"#f4a261","rbd":"#6a0572","sdb":"#457b9d"};
+  const CLASS_VI = {"healthy":"Bình thường","insomnia":"Mất ngủ","narcolepsy":"Ngủ rũ","nfle":"ĐK thùy trán","plm":"Cử động chân","rbd":"Rối loạn REM","sdb":"Rối loạn hô hấp"};
+
+  const epochData = {{ chart_data|safe }};
+  const labels = epochData.map(d => "E" + d.epoch_index);
+  const classNums = epochData.map(d => CLASS_MAP[d.cls] !== undefined ? CLASS_MAP[d.cls] : 0);
+  const bgColors = epochData.map(d => CLASS_COLORS[d.cls] || "#999");
+
+  new Chart(document.getElementById("sleepTimelineChart"), {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "Lớp dự đoán",
+        data: classNums,
+        backgroundColor: bgColors,
+        borderRadius: 4,
+        barPercentage: 0.85
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = epochData[ctx.dataIndex];
+              const vi = CLASS_VI[d.cls] || d.cls;
+              return " " + vi + " (" + d.cls + ")";
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          ticks: {
+            stepSize: 1,
+            callback: v => { const keys = Object.keys(CLASS_MAP); return keys[v] ? (CLASS_VI[keys[v]] || keys[v]) : ""; }
+          },
+          min: 0, max: 6
+        },
+        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 20 } }
+      }
+    }
+  });
+
+  const classCounts = {{ class_distribution_json|safe }};
+  const pieLabels = Object.keys(classCounts).map(k => (CLASS_VI[k] || k) + " (" + k + ")");
+  const pieData = Object.values(classCounts);
+  const pieColors = Object.keys(classCounts).map(k => CLASS_COLORS[k] || "#999");
+
+  new Chart(document.getElementById("classPieChart"), {
+    type: "doughnut",
+    data: {
+      labels: pieLabels,
+      datasets: [{ data: pieData, backgroundColor: pieColors, borderWidth: 0, hoverOffset: 6 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } }
+      }
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

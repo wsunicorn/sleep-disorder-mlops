@@ -1,10 +1,10 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Sleep Portal{% endblock %}</title>
+  <title>{% block title %}Cổng Thông Tin Giấc Ngủ{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -22,10 +22,10 @@
             <span class="brand-title">Sleep Portal</span>
           </a>
           <div class="ms-auto d-flex gap-2 flex-wrap">
-            <a class="btn btn-nav btn-pill" href="{% url 'dashboard_home' %}">Overview</a>
-            <a class="btn btn-nav btn-pill" href="{% url 'patient_list' %}">Patients</a>
-            <a class="btn btn-nav btn-pill" href="{% url 'predict_page' %}">Predict</a>
-            <a class="btn btn-nav btn-pill" href="{% url 'pipeline_page' %}">Pipeline</a>
+            <a class="btn btn-nav btn-pill" href="{% url 'dashboard_home' %}">Tổng quan</a>
+            <a class="btn btn-nav btn-pill" href="{% url 'patient_list' %}">Bệnh nhân</a>
+            <a class="btn btn-nav btn-pill" href="{% url 'predict_page' %}">Dự đoán</a>
+            <a class="btn btn-nav btn-pill" href="{% url 'pipeline_page' %}">Quy trình</a>
           </div>
         </nav>
       </div>
@@ -37,8 +37,8 @@
 
     <footer class="site-footer">
       <div class="container d-flex flex-wrap justify-content-between gap-2 py-4">
-        <span>Sleep Disorder Detection Portal</span>
-        <span>Clinical analytics, inference serving, and monitoring in one place.</span>
+        <span>Hệ thống Phát hiện Rối loạn Giấc ngủ</span>
+        <span>Phân tích lâm sàng, phục vụ suy luận và giám sát toàn diện.</span>
       </div>
     </footer>
   </div>

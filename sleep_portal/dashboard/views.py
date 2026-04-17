@@ -1,3 +1,5 @@
+import json
+from collections import Counter
 from pathlib import Path
 
 from django.conf import settings
@@ -5,6 +7,22 @@ from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404, render
 
 from .models import Patient, EpochPrediction
+
+# Vietnamese name mapping for disorder classes
+_VI_NAMES = {
+    "healthy":    "Bình thường",
+    "insomnia":   "Mất ngủ",
+    "narcolepsy": "Ngủ rũ",
+    "nfle":       "Động kinh thùy trán về đêm",
+    "plm":        "Cử động chân định kỳ",
+    "rbd":        "Rối loạn hành vi REM",
+    "sdb":        "Rối loạn hô hấp khi ngủ",
+}
+_NORMAL_CLASSES = {"healthy"}
+
+
+def _vi_name(cls: str) -> str:
+    return _VI_NAMES.get(str(cls).lower(), cls)
 
 
 def dashboard_home(request):
@@ -24,11 +42,19 @@ def dashboard_home(request):
     diagnosis_breakdown = [
         {
             "name": item["diagnosis"],
+            "vi_name": _vi_name(item["diagnosis"]),
             "count": item["count"],
             "percentage": ((item["count"] / total_patients) * 100) if total_patients else 0,
         }
         for item in diagnosis_counts
     ]
+    normal_count = sum(
+        item["count"] for item in diagnosis_counts
+        if item["diagnosis"].lower() in _NORMAL_CLASSES
+    )
+    abnormal_count = total_patients - normal_count
+    normal_pct = (normal_count / total_patients * 100) if total_patients else 0
+    abnormal_pct = (abnormal_count / total_patients * 100) if total_patients else 0
     return render(
         request,
         "dashboard/home.html",
@@ -39,6 +65,10 @@ def dashboard_home(request):
             "monitored_patients": monitored_patients,
             "average_confidence": average_confidence,
             "diagnosis_breakdown": diagnosis_breakdown,
+            "normal_count": normal_count,
+            "abnormal_count": abnormal_count,
+            "normal_pct": normal_pct,
+            "abnormal_pct": abnormal_pct,
             "model_name": settings.MLFLOW_MODEL_NAME,
             "model_stage": settings.MLFLOW_MODEL_STAGE,
         },
@@ -67,6 +97,18 @@ def patient_detail(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     predictions = EpochPrediction.objects.filter(patient=patient).order_by("epoch_index")
     confidence_values = predictions.exclude(confidence__isnull=True)
+
+    # Build chart data for JS visualizations
+    pred_list = list(predictions.values("epoch_index", "predicted_class", "confidence"))
+    chart_data = json.dumps([
+        {"epoch_index": p["epoch_index"], "cls": p["predicted_class"]}
+        for p in pred_list
+    ])
+    class_distribution = dict(
+        Counter(p["predicted_class"] for p in pred_list)
+    )
+    class_distribution_json = json.dumps(class_distribution)
+
     return render(
         request,
         "dashboard/patient_detail.html",
@@ -77,6 +119,9 @@ def patient_detail(request, patient_id):
             "average_confidence": confidence_values.aggregate(value=Avg("confidence"))["value"]
             or 0,
             "latest_prediction": predictions.order_by("-epoch_index").first(),
+            "chart_data": chart_data,
+            "class_distribution": class_distribution,
+            "class_distribution_json": class_distribution_json,
         },
     )
 

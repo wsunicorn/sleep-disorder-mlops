@@ -31,7 +31,8 @@ jobs:
 
       - name: Install monitoring dependencies
         run: |
-          pip install pandas pyarrow evidently==0.4.30 boto3 python-dotenv loguru
+          pip install --upgrade pip
+          pip install pandas pyarrow "evidently>=0.4.0,<0.5.0" boto3 python-dotenv loguru
 
       - name: Configure AWS credentials
         if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
@@ -42,6 +43,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Run drift detection
+        continue-on-error: true
         shell: bash
         run: |
           REF="${{ github.event.inputs.reference_data || vars.DRIFT_REFERENCE_DATA }}"

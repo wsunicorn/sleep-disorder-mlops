@@ -25,7 +25,8 @@ Hệ thống MLOps end-to-end phát hiện **7 loại rối loạn giấc ngủ*
 
 ```
 ┌─────────────────── Layer 1: IoT Simulation ────────────────────────┐
-│  Python Simulator → Mosquitto MQTT → AWS S3 (.npy) + PostgreSQL    │
+│  Python Simulator (EEG tổng hợp) → HTTP REST → Django /ingest/     │
+│  5 bệnh nhân song song · 24 features/epoch · Lưu vào PostgreSQL    │
 └────────────────────────────┬───────────────────────────────────────┘
                              ▼
 ┌─────────────────── Layer 2: Training ──────────────────────────────┐
@@ -216,7 +217,24 @@ python manage.py runserver
 # Mở http://localhost:8000
 ```
 
-### Bước 3 — Chạy IoT Demo (không cần MQTT/S3)
+### Bước 3 — Chạy Multi-Patient IoT Demo (Đẩy dữ liệu lên AWS)
+
+`multi_patient_demo.py` mô phỏng 5 thiết bị EEG IoT đồng thời, tạo EEG tổng hợp, trích xuất 24 features, gửi predict và lưu bệnh nhân qua `/api/v1/ingest/`.
+
+```powershell
+# Chạy 5 bệnh nhân song song đẩy lên AWS ALB (production)
+python iot_simulation/multi_patient_demo.py --epochs 20 --delay 0.1
+
+# Tùy chỉnh:
+python iot_simulation/multi_patient_demo.py \
+  --url http://sleep-portal-alb-1369421469.ap-southeast-1.elb.amazonaws.com \
+  --epochs 50 --batch-size 5 --delay 0.05 --workers 5
+
+# Sau khi chạy, kiểm tra trên web:
+# http://sleep-portal-alb-1369421469.ap-southeast-1.elb.amazonaws.com/patients/
+```
+
+### Bước 4 — Chạy Single-Patient IoT Demo
 
 `demo_local.py` mô phỏng thiết bị EEG IoT: tạo dữ liệu EEG tổng hợp, tính 24 features, gửi batch đến API, hiển thị kết quả chẩn đoán.
 
@@ -391,6 +409,7 @@ Truy cập `http://sleep-portal-alb-1369421469.ap-southeast-1.elb.amazonaws.com`
 | **Pipeline Status** | `/pipeline/` | Model registry versions, CI/CD workflow status, architecture |
 | **API Health** | `/api/v1/health/` | JSON: `{"status": "ok"}` |
 | **API Model Info** | `/api/v1/model-info/` | JSON: model name, stage, 24 features, ready status |
+| **API Ingest** | `POST /api/v1/ingest/` | Nhận dữ liệu IoT: lưu bệnh nhân + epoch predictions |
 
 ### Inference Studio — 4 tabs
 
@@ -402,6 +421,27 @@ Truy cập `http://sleep-portal-alb-1369421469.ap-southeast-1.elb.amazonaws.com`
 ---
 
 ## API Reference
+
+### POST /api/v1/ingest/
+
+Nhận dữ liệu từ thiết bị IoT: upsert bệnh nhân + lưu epoch predictions.
+
+```bash
+curl -X POST \
+  http://sleep-portal-alb-1369421469.ap-southeast-1.elb.amazonaws.com/api/v1/ingest/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patient_id": "PT-001",
+    "diagnosis": "insomnia",
+    "age": 42,
+    "gender": "F",
+    "epochs": [
+      {"epoch_index": 0, "predicted_class": "insomnia", "confidence": 0.87, "timestamp": "2025-01-01T00:00:00Z"}
+    ]
+  }'
+```
+
+---
 
 ### POST /api/v1/predict/
 

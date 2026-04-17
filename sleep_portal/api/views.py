@@ -2,6 +2,7 @@
 
 import io
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -201,3 +202,100 @@ class ModelInfoView(APIView):
 
     def get(self, request):
         return Response(get_model_status(), status=status.HTTP_200_OK)
+
+
+class IngestView(APIView):
+    """
+    POST /api/v1/ingest/
+    Nhận kết quả dự đoán từ IoT client, lưu Patient + EpochPrediction vào DB.
+
+    Body:
+    {
+        "patient_id": "patient_001",
+        "disorder": "insomnia",          // chẩn đoán chính từ IoT
+        "age": 35,                        // tùy chọn
+        "gender": "M",                    // tùy chọn
+        "epochs": [
+            {
+                "epoch_index": 0,
+                "predicted_class": "nfle",
+                "confidence": 0.72,       // tùy chọn
+                "timestamp": "2026-04-17T02:18:39Z"
+            },
+            ...
+        ]
+    }
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        from dashboard.models import Patient, EpochPrediction
+
+        patient_id = request.data.get("patient_id", "").strip()
+        if not patient_id:
+            return Response({"error": "patient_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        disorder = request.data.get("disorder", "unknown").strip()
+        age = request.data.get("age")
+        gender = request.data.get("gender", "").strip() or None
+        epochs_data = request.data.get("epochs", [])
+
+        if not isinstance(epochs_data, list):
+            return Response({"error": "epochs must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Upsert Patient
+        patient, created = Patient.objects.update_or_create(
+            patient_id=patient_id,
+            defaults={
+                "diagnosis": disorder,
+                "age": age,
+                "gender": gender,
+            },
+        )
+
+        # Bulk upsert EpochPredictions
+        saved = 0
+        skipped = 0
+        for ep in epochs_data:
+            try:
+                epoch_index = int(ep.get("epoch_index", 0))
+                predicted_class = str(ep.get("predicted_class", "unknown"))
+                confidence = ep.get("confidence")
+                ts_raw = ep.get("timestamp")
+                if ts_raw:
+                    try:
+                        ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                    except ValueError:
+                        ts = datetime.now(tz=timezone.utc)
+                else:
+                    ts = datetime.now(tz=timezone.utc)
+
+                EpochPrediction.objects.update_or_create(
+                    patient=patient,
+                    epoch_index=epoch_index,
+                    defaults={
+                        "predicted_class": predicted_class,
+                        "confidence": confidence,
+                        "timestamp": ts,
+                    },
+                )
+                saved += 1
+            except Exception as exc:
+                logger.warning(f"Ingest: skip epoch {ep}: {exc}")
+                skipped += 1
+
+        logger.info(
+            f"Ingest: patient={patient_id} ({'created' if created else 'updated'}), "
+            f"epochs saved={saved}, skipped={skipped}"
+        )
+        return Response(
+            {
+                "patient_id": patient_id,
+                "patient_created": created,
+                "diagnosis": disorder,
+                "epochs_saved": saved,
+                "epochs_skipped": skipped,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )

@@ -1,13 +1,47 @@
 {% extends "dashboard/base.html" %}
 
-{% block title %}Inference Studio — Sleep Portal{% endblock %}
+{% block title %}Studio Suy luận — Cổng Thông Tin Giấc Ngủ{% endblock %}
+
+{% block extra_head %}
+<style>
+.predict-result-card {
+  display: none;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  text-align: center;
+  background: var(--surface-strong);
+}
+.predict-result-card.visible { display: block; }
+.predict-disorder-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
+.predict-disorder-name {
+  font-family: "Instrument Serif", serif;
+  font-size: 1.8rem;
+  color: var(--brand);
+  margin-bottom: 0.25rem;
+}
+.predict-disorder-en { font-size: 0.9rem; color: var(--ink-soft); }
+.predict-disorder-desc { font-size: 0.85rem; color: var(--ink-soft); margin-top: 0.75rem; max-width: 320px; margin-inline: auto; }
+.predict-cached-badge { font-size: 0.75rem; }
+.predict-error-card {
+  display: none;
+  border: 2px solid var(--danger);
+  border-radius: var(--radius-lg);
+  padding: 1.2rem;
+  background: rgba(193,18,31,0.06);
+  color: var(--danger);
+}
+.predict-error-card.visible { display: block; }
+.batch-result-badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; color: #fff; }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="page-header mb-4">
-  <span class="eyebrow">Prediction</span>
-  <h1 class="hero-title" style="font-size:2rem">Inference Studio</h1>
+  <span class="eyebrow">Dự đoán</span>
+  <h1 class="hero-title" style="font-size:2rem">Studio Suy luận</h1>
   <p class="hero-copy" style="color:var(--ink-soft)">
-    Run sleep stage / disorder predictions using feature vectors, CSV batch files, or raw EDF recordings.
+    Chạy dự đoán rối loạn giấc ngủ bằng vector đặc trưng, file CSV theo lô hoặc file EDF thô.
   </p>
 </div>
 
@@ -15,17 +49,17 @@
 <ul class="nav nav-pills mb-4 gap-2" id="predictTabs" role="tablist">
   <li class="nav-item" role="presentation">
     <button class="btn btn-nav btn-pill active" id="tab-single" data-bs-toggle="tab" data-bs-target="#panel-single" type="button" role="tab">
-      Single vector
+      Vector đơn lẻ
     </button>
   </li>
   <li class="nav-item" role="presentation">
     <button class="btn btn-nav btn-pill" id="tab-batch" data-bs-toggle="tab" data-bs-target="#panel-batch" type="button" role="tab">
-      Batch CSV
+      CSV theo lô
     </button>
   </li>
   <li class="nav-item" role="presentation">
     <button class="btn btn-nav btn-pill" id="tab-edf" data-bs-toggle="tab" data-bs-target="#panel-edf" type="button" role="tab">
-      EDF file
+      File EDF
     </button>
   </li>
   <li class="nav-item" role="presentation">
@@ -42,64 +76,67 @@
     <div class="section-card">
       <div class="section-heading">
         <div>
-          <span class="eyebrow">Input</span>
-          <h3>Single epoch feature vector</h3>
+          <span class="eyebrow">Đầu vào</span>
+          <h3>Vector đặc trưng một epoch</h3>
         </div>
-        <span class="chip">{{ expected_feature_count }} floats expected</span>
+        <span class="chip">{{ expected_feature_count }} giá trị cần nhập</span>
       </div>
       <div class="row g-4">
         <div class="col-lg-6">
           <div class="studio-panel">
             <label class="form-label" for="feature-input">
-              Comma-separated feature values
+              Nhập các giá trị đặc trưng, cách nhau bằng dấu phẩy
             </label>
             <textarea
               id="feature-input"
               class="form-control studio-textarea"
               spellcheck="false"
               rows="6"
-              placeholder="0.12, 0.05, 0.31, ...  ({{ expected_feature_count }} values)"></textarea>
+              placeholder="0.12, 0.05, 0.31, ...  ({{ expected_feature_count }} giá trị)"></textarea>
             <div class="d-flex flex-wrap gap-2 mt-3">
-              <button class="btn btn-outline-dark btn-pill btn-sm" id="sample-btn" type="button">Load sample</button>
-              <button class="btn btn-accent btn-pill" id="single-predict-btn" type="button">Predict epoch</button>
+              <button class="btn btn-outline-dark btn-pill btn-sm" id="sample-btn" type="button">Tải dữ liệu mẫu</button>
+              <button class="btn btn-accent btn-pill" id="single-predict-btn" type="button">Dự đoán epoch</button>
             </div>
           </div>
         </div>
         <div class="col-lg-6">
-          <div class="studio-panel result-panel h-100">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <label class="form-label mb-0">Result</label>
-              <span id="single-status" class="chip">Idle</span>
+          <div class="studio-panel h-100 d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <label class="form-label mb-0">Kết quả dự đoán</label>
+              <span id="single-status" class="chip">Chờ</span>
             </div>
-            <pre id="single-output" class="result-output">{
-  "predicted_class": null
-}</pre>
+            <!-- Beautiful result card -->
+            <div id="single-result-card" class="predict-result-card flex-grow-1 d-flex flex-column justify-content-center">
+              <div class="predict-disorder-icon" id="res-icon">💤</div>
+              <div class="predict-disorder-name" id="res-name">—</div>
+              <div class="predict-disorder-en" id="res-en">—</div>
+              <div class="predict-disorder-desc" id="res-desc"></div>
+              <div class="mt-2">
+                <span id="res-cached" class="predict-cached-badge chip chip-soft" style="display:none">📦 Từ cache</span>
+              </div>
+            </div>
+            <div id="single-error-card" class="predict-error-card">
+              <strong>⚠️ Lỗi:</strong> <span id="single-error-msg"></span>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Feature reference table -->
       <details class="mt-4">
-        <summary class="fw-bold" style="cursor:pointer;color:var(--brand)">Feature schema reference ({{ expected_feature_count }} features)</summary>
+        <summary class="fw-bold" style="cursor:pointer;color:var(--brand)">Bảng tham chiếu đặc trưng ({{ expected_feature_count }} đặc trưng)</summary>
         <div class="table-responsive mt-3">
           <table class="table table-theme table-sm">
-            <thead><tr><th>#</th><th>Feature</th><th>Description</th></tr></thead>
+            <thead><tr><th>#</th><th>Đặc trưng</th><th>Mô tả</th></tr></thead>
             <tbody>
-              <tr><td>0–4</td><td>ch0_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 0</td></tr>
-              <tr><td>5–9</td><td>ch1_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 1</td></tr>
-              <tr><td>10–14</td><td>ch2_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 2</td></tr>
-              <tr><td>15–19</td><td>ch3_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 3</td></tr>
-              <tr><td>20–24</td><td>ch4_delta/theta/alpha/beta/gamma_rel</td><td>Relative band power — channel 4</td></tr>
-              <tr><td>25–29</td><td>delta/theta/alpha/beta/gamma_power_mean</td><td>Mean absolute band power across channels</td></tr>
-              <tr><td>30–34</td><td>delta/theta/alpha/beta/gamma_power_std</td><td>Std of band power across channels</td></tr>
-              <tr><td>35</td><td>spectral_entropy_mean</td><td>Signal complexity</td></tr>
-              <tr><td>36</td><td>peak_frequency_mean</td><td>Dominant frequency (Hz)</td></tr>
-              <tr><td>37</td><td>mean_frequency_mean</td><td>Power-weighted mean frequency</td></tr>
-              <tr><td>38</td><td>amplitude_mean</td><td>Mean absolute amplitude</td></tr>
-              <tr><td>39</td><td>amplitude_std</td><td>Amplitude standard deviation</td></tr>
-              <tr><td>40</td><td>rms</td><td>Root mean square amplitude</td></tr>
-              <tr><td>41</td><td>delta_beta_ratio</td><td>Drowsiness marker</td></tr>
-              <tr><td>42</td><td>theta_alpha_ratio</td><td>Sleepiness marker</td></tr>
+              <tr><td>0–4</td><td>ch0_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 0</td></tr>
+              <tr><td>5–9</td><td>ch1_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 1</td></tr>
+              <tr><td>10–14</td><td>ch2_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 2</td></tr>
+              <tr><td>15–19</td><td>ch3_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 3</td></tr>
+              <tr><td>20</td><td>spectral_entropy_mean</td><td>Độ phức tạp của tín hiệu</td></tr>
+              <tr><td>21</td><td>peak_frequency_mean</td><td>Tần số trội (Hz)</td></tr>
+              <tr><td>22</td><td>amplitude_mean</td><td>Biên độ trung bình tuyệt đối</td></tr>
+              <tr><td>23</td><td>rms</td><td>Biên độ hiệu dụng (RMS)</td></tr>
             </tbody>
           </table>
         </div>
@@ -112,48 +149,48 @@
     <div class="section-card">
       <div class="section-heading">
         <div>
-          <span class="eyebrow">Batch input</span>
-          <h3>CSV file upload</h3>
+          <span class="eyebrow">Đầu vào theo lô</span>
+          <h3>Tải lên file CSV</h3>
         </div>
       </div>
       <p class="helper-text mb-4">
-        Upload a CSV file where each row contains exactly <strong>{{ expected_feature_count }} numeric features</strong>.
-        Optional header row is auto-detected. Maximum 256 rows per request.
+        Tải lên file CSV, mỗi hàng chứa đúng <strong>{{ expected_feature_count }} đặc trưng số</strong>.
+        Hàng tiêu đề tùy chọn được tự động phát hiện. Tối đa 256 hàng mỗi lần.
       </p>
 
       <div class="row g-4">
         <div class="col-md-5">
           <div class="studio-panel">
-            <label class="form-label" for="batch-file">Select CSV file</label>
+            <label class="form-label" for="batch-file">Chọn file CSV</label>
             <input id="batch-file" class="form-control" type="file" accept=".csv,text/csv">
-            <p class="helper-text mt-2">Drag &amp; drop or click to browse</p>
+            <p class="helper-text mt-2">Kéo thả hoặc nhấn để chọn file</p>
             <div id="batch-file-info" class="mt-2 d-none">
               <span class="chip chip-soft" id="batch-file-name"></span>
               <span class="chip" id="batch-row-count"></span>
             </div>
             <button class="btn btn-accent btn-pill mt-3" id="batch-predict-btn" type="button" disabled>
-              Run batch prediction
+              Chạy dự đoán theo lô
             </button>
           </div>
         </div>
         <div class="col-md-7">
           <div id="batch-results-wrapper" class="section-card" style="background:var(--bg-strong);padding:1rem">
             <div class="d-flex justify-content-between align-items-center mb-2">
-              <strong>Results</strong>
-              <span id="batch-status" class="chip">No file loaded</span>
+              <strong>Kết quả</strong>
+              <span id="batch-status" class="chip">Chưa tải file</span>
             </div>
             <div class="table-responsive" style="max-height:320px;overflow-y:auto">
               <table class="table table-theme align-middle mb-0">
                 <thead>
-                  <tr><th>Row</th><th>Predicted class</th></tr>
+                  <tr><th>Hàng</th><th>Lớp dự đoán</th><th>Tên rối loạn</th></tr>
                 </thead>
                 <tbody id="batch-results-body">
-                  <tr><td colspan="2" class="text-muted">Upload a CSV to see results.</td></tr>
+                  <tr><td colspan="3" class="text-muted">Tải CSV để xem kết quả.</td></tr>
                 </tbody>
               </table>
             </div>
             <button class="btn btn-outline-dark btn-sm btn-pill mt-2 d-none" id="batch-download-btn">
-              Download results CSV
+              Tải xuống CSV kết quả
             </button>
           </div>
         </div>
@@ -166,64 +203,74 @@
     <div class="section-card">
       <div class="section-heading">
         <div>
-          <span class="eyebrow">Raw signal</span>
-          <h3>EDF file prediction</h3>
+          <span class="eyebrow">Tín hiệu thô</span>
+          <h3>Dự đoán từ file EDF</h3>
         </div>
-        <span class="chip chip-warning">Full pipeline</span>
+        <span class="chip chip-warning">Toàn bộ quy trình</span>
       </div>
       <p class="helper-text mb-4">
-        Upload a raw <code>.edf</code> polysomnographic recording. The server will apply the full preprocessing
-        pipeline: bandpass filter → 30s epoch segmentation → feature extraction → prediction.
-        <br><strong>Note:</strong> Large EDF files (&gt; 100 MB) may take 30–60 seconds to process.
+        Tải lên file ghi <code>.edf</code> đa kênh giấc ngủ. Máy chủ sẽ áp dụng toàn bộ quy trình tiền xử lý:
+        lọc băng thông → phân đoạn epoch 2 giây → trích xuất đặc trưng → dự đoán.
+        <br><strong>Lưu ý:</strong> File EDF lớn (&gt; 100 MB) có thể mất 30–60 giây để xử lý.
       </p>
 
       <div class="row g-4">
         <div class="col-md-5">
           <div class="studio-panel">
-            <label class="form-label" for="edf-file">Select EDF file</label>
+            <label class="form-label" for="edf-file">Chọn file EDF</label>
             <input id="edf-file" class="form-control" type="file" accept=".edf">
-            <p class="helper-text mt-2">Format: European Data Format (.edf)</p>
+            <p class="helper-text mt-2">Định dạng: European Data Format (.edf)</p>
             <div id="edf-file-info" class="mt-2 d-none">
               <span class="chip chip-soft" id="edf-file-name"></span>
             </div>
             <button class="btn btn-accent btn-pill mt-3" id="edf-predict-btn" type="button" disabled>
-              Process &amp; predict
+              Xử lý &amp; dự đoán
             </button>
             <div id="edf-progress" class="mt-3 d-none">
               <div class="progress" style="height:6px">
                 <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:100%"></div>
               </div>
-              <p class="helper-text mt-1">Processing EDF — this may take a moment…</p>
+              <p class="helper-text mt-1">Đang xử lý EDF — vui lòng chờ…</p>
             </div>
           </div>
         </div>
         <div class="col-md-7">
           <div class="studio-panel result-panel">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <label class="form-label mb-0">EDF Prediction Results</label>
-              <span id="edf-status" class="chip">No file loaded</span>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <label class="form-label mb-0">Kết quả EDF</label>
+              <span id="edf-status" class="chip">Chưa tải file</span>
             </div>
-            <pre id="edf-output" class="result-output" style="max-height:300px">{
-  "epochs": [],
-  "predicted_class": null
-}</pre>
+            <!-- Beautiful EDF result -->
+            <div id="edf-result-card" class="predict-result-card mb-3">
+              <div class="predict-disorder-icon" id="edf-icon">📁</div>
+              <div class="predict-disorder-name" id="edf-name">—</div>
+              <div class="predict-disorder-en" id="edf-en"></div>
+              <div class="predict-disorder-desc" id="edf-desc"></div>
+            </div>
+            <div id="edf-breakdown" class="d-none">
+              <strong style="font-size:0.85rem">Phân bố kết quả:</strong>
+              <div id="edf-breakdown-list" class="mt-2"></div>
+            </div>
+            <div id="edf-error-card" class="predict-error-card">
+              <strong>⚠️ Lỗi:</strong> <span id="edf-error-msg"></span>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Pipeline diagram -->
       <div class="pipeline-diagram mt-4">
-        <span class="pipeline-step">📁 EDF file</span>
+        <span class="pipeline-step">📁 File EDF</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">🔬 MNE filter</span>
+        <span class="pipeline-step">🔬 Lọc MNE</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">✂️ 30s epochs</span>
+        <span class="pipeline-step">✂️ Epoch 2 giây</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">📐 43 features</span>
+        <span class="pipeline-step">📐 {{ expected_feature_count }} đặc trưng</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">🤖 XGBoost</span>
+        <span class="pipeline-step">🤖 LightGBM</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step chip chip-soft">Prediction</span>
+        <span class="pipeline-step chip chip-soft">Dự đoán</span>
       </div>
     </div>
   </div>
@@ -233,8 +280,8 @@
     <div class="section-card">
       <div class="section-heading">
         <div>
-          <span class="eyebrow">Direct API</span>
-          <h3>JSON &amp; curl examples</h3>
+          <span class="eyebrow">API trực tiếp</span>
+          <h3>JSON &amp; curl ví dụ</h3>
         </div>
       </div>
 
@@ -246,15 +293,12 @@
   -H "Content-Type: application/json" \
   -d '{
     "features": [[
-      0.10, 0.05, 0.03, 0.02, 0.01,
-      0.10, 0.05, 0.03, 0.02, 0.01,
-      0.10, 0.05, 0.03, 0.02, 0.01,
-      0.10, 0.05, 0.03, 0.02, 0.01,
-      0.10, 0.05, 0.03, 0.02, 0.01,
-      10.0, 5.0, 8.0, 3.0, 15.0,
-      1.0, 0.5, 1.0, 0.5, 1.0,
-      1.5, 5.0, 0.8, 0.5, 0.9,
-      0.7, 2.0, 1.5
+      0.10, 0.05, 0.03, 0.02,
+      0.10, 0.05, 0.03, 0.02,
+      0.10, 0.05, 0.03, 0.02,
+      0.10, 0.05, 0.03, 0.02,
+      1.5, 5.0, 0.8, 0.5,
+      0.9, 0.7, 2.0, 1.5
     ]]
   }'</pre>
           <h5 class="mt-3">POST /api/v1/predict-edf/</h5>
@@ -263,60 +307,58 @@
   -F "file=@recording.edf"</pre>
         </div>
         <div class="col-lg-6">
-          <h5>Expected response</h5>
+          <h5>Phản hồi mẫu</h5>
           <pre class="result-output" style="font-size:0.78rem">{
-  "predicted_class": "Wake",
-  "predictions": ["Wake", "S1", "S2"],
-  "prediction_count": 3,
-  "class_counts": {"Wake": 1, "S1": 1, "S2": 1},
+  "predicted_class": "insomnia",
+  "predictions": ["insomnia"],
+  "prediction_count": 1,
+  "class_counts": {"insomnia": 1},
   "cached": false
 }</pre>
-          <h5 class="mt-3">Label mapping</h5>
+          <h5 class="mt-3">Bảng nhãn lớp</h5>
           <div class="table-responsive">
             <table class="table table-theme table-sm mt-2">
-              <thead><tr><th>Value</th><th>Stage / Class</th></tr></thead>
+              <thead><tr><th>Nhãn</th><th>Tên tiếng Việt</th><th>Mô tả</th></tr></thead>
               <tbody>
-                <tr><td>0</td><td>Wake (W)</td></tr>
-                <tr><td>1</td><td>Stage 1 (S1 — light sleep)</td></tr>
-                <tr><td>2</td><td>Stage 2 (S2 — intermediate)</td></tr>
-                <tr><td>3</td><td>Stage 3 (S3 — deep sleep)</td></tr>
-                <tr><td>4</td><td>Stage 4 (S4 — deep sleep)</td></tr>
-                <tr><td>5</td><td>REM sleep</td></tr>
+                <tr><td><code>healthy</code></td><td>✅ Bình thường</td><td>Không có rối loạn giấc ngủ</td></tr>
+                <tr><td><code>insomnia</code></td><td>😴 Mất ngủ</td><td>Khó đi vào giấc ngủ hoặc duy trì giấc ngủ</td></tr>
+                <tr><td><code>narcolepsy</code></td><td>💤 Ngủ rũ</td><td>Buồn ngủ quá mức ban ngày</td></tr>
+                <tr><td><code>nfle</code></td><td>⚡ Động kinh thùy trán về đêm</td><td>Co giật xảy ra khi ngủ</td></tr>
+                <tr><td><code>plm</code></td><td>🦵 Cử động chân định kỳ</td><td>Cử động chân tay lặp đi lặp lại khi ngủ</td></tr>
+                <tr><td><code>rbd</code></td><td>🌀 Rối loạn hành vi REM</td><td>Thực hiện hành động trong giấc mơ REM</td></tr>
+                <tr><td><code>sdb</code></td><td>🫁 Rối loạn hô hấp khi ngủ</td><td>Ngưng thở hoặc ngáy nặng khi ngủ</td></tr>
               </tbody>
             </table>
           </div>
           <div class="d-flex gap-2 mt-3">
-            <a class="btn btn-outline-dark btn-pill btn-sm" href="/api/v1/health/" target="_blank" rel="noreferrer">Health check</a>
-            <a class="btn btn-outline-dark btn-pill btn-sm" href="/api/v1/model-info/" target="_blank" rel="noreferrer">Model info</a>
+            <a class="btn btn-outline-dark btn-pill btn-sm" href="/api/v1/health/" target="_blank" rel="noreferrer">Kiểm tra sức khoẻ</a>
+            <a class="btn btn-outline-dark btn-pill btn-sm" href="/api/v1/model-info/" target="_blank" rel="noreferrer">Thông tin mô hình</a>
           </div>
         </div>
       </div>
 
       <!-- Live JSON editor -->
       <div class="mt-4">
-        <h5>Live JSON editor</h5>
+        <h5>Trình soạn thảo JSON trực tiếp</h5>
         <div class="row g-3">
           <div class="col-lg-7">
             <textarea id="json-editor" class="form-control studio-textarea" rows="10" spellcheck="false">{
   "features": [[
-    0.10, 0.05, 0.03, 0.02, 0.01,
-    0.10, 0.05, 0.03, 0.02, 0.01,
-    0.10, 0.05, 0.03, 0.02, 0.01,
-    0.10, 0.05, 0.03, 0.02, 0.01,
-    0.10, 0.05, 0.03, 0.02, 0.01,
-    10.0, 5.0, 8.0, 3.0, 15.0,
-    1.0, 0.5, 1.0, 0.5, 1.0,
-    1.5, 5.0, 0.8, 0.5, 0.9,
-    0.7, 2.0, 1.5
+    0.10, 0.05, 0.03, 0.02,
+    0.10, 0.05, 0.03, 0.02,
+    0.10, 0.05, 0.03, 0.02,
+    0.10, 0.05, 0.03, 0.02,
+    1.5, 5.0, 0.8, 0.5,
+    0.9, 0.7, 2.0, 1.5
   ]]
 }</textarea>
-            <button class="btn btn-accent btn-pill mt-2" id="json-send-btn" type="button">Send request</button>
+            <button class="btn btn-accent btn-pill mt-2" id="json-send-btn" type="button">Gửi yêu cầu</button>
           </div>
           <div class="col-lg-5">
             <div class="studio-panel result-panel h-100">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <label class="form-label mb-0">Response</label>
-                <span id="json-status" class="chip">Idle</span>
+                <label class="form-label mb-0">Phản hồi</label>
+                <span id="json-status" class="chip">Chờ</span>
               </div>
               <pre id="json-output" class="result-output" style="min-height:160px">—</pre>
             </div>
@@ -334,10 +376,20 @@
   const PREDICT_URL = "/api/v1/predict/";
   const PREDICT_EDF_URL = "/api/v1/predict-edf/";
   const EXPECTED = {{ expected_feature_count }};
-  const STAGE_MAP = { "0": "Wake", "1": "S1", "2": "S2", "3": "S3", "4": "S4", "5": "REM" };
 
-  function labelClass(c) {
-    return STAGE_MAP[String(c)] || String(c);
+  // ── Disorder metadata ─────────────────────────────────────────────
+  const DISORDER_INFO = {
+    "healthy":    { icon: "✅", vi: "Bình thường",                 en: "Healthy / No disorder",             desc: "Không phát hiện rối loạn giấc ngủ. Giấc ngủ trong giới hạn bình thường.", color: "#2a9d8f" },
+    "insomnia":   { icon: "😴", vi: "Mất ngủ",                    en: "Insomnia",                           desc: "Khó đi vào giấc ngủ hoặc duy trì giấc ngủ qua đêm.", color: "#e76f51" },
+    "narcolepsy": { icon: "💤", vi: "Ngủ rũ",                     en: "Narcolepsy",                         desc: "Buồn ngủ quá mức ban ngày, có thể kèm mất trương lực cơ đột ngột.", color: "#bc6c25" },
+    "nfle":       { icon: "⚡", vi: "Động kinh thùy trán về đêm", en: "Nocturnal Frontal Lobe Epilepsy",    desc: "Co giật xảy ra trong khi ngủ, thường ở giai đoạn NREM.", color: "#264653" },
+    "plm":        { icon: "🦵", vi: "Cử động chân định kỳ",       en: "Periodic Leg Movements",            desc: "Cử động chân tay lặp đi lặp lại gây gián đoạn giấc ngủ.", color: "#f4a261" },
+    "rbd":        { icon: "🌀", vi: "Rối loạn hành vi REM",       en: "REM Sleep Behavior Disorder",       desc: "Người bệnh thực hiện hành động trong giấc mơ REM, có thể gây thương tích.", color: "#6a0572" },
+    "sdb":        { icon: "🫁", vi: "Rối loạn hô hấp khi ngủ",   en: "Sleep-Disordered Breathing",        desc: "Ngưng thở (apnea) hoặc ngáy nặng làm giảm chất lượng giấc ngủ.", color: "#457b9d" },
+  };
+
+  function getInfo(cls) {
+    return DISORDER_INFO[String(cls).toLowerCase()] || { icon: "🔬", vi: cls, en: cls, desc: "", color: "#999" };
   }
 
   function setChip(el, text, variant) {
@@ -349,21 +401,24 @@
     return line.split(",").map(s => Number(s.trim()));
   }
 
-  // ── Single vector ────────────────────────────────────────────────────
+  // ── Single vector ─────────────────────────────────────────────────
   const sampleFeatures = Array.from({ length: EXPECTED }, (_, i) => +((i + 1) / 10).toFixed(2));
   const featureInput = document.getElementById("feature-input");
   const singleStatus = document.getElementById("single-status");
-  const singleOutput = document.getElementById("single-output");
+  const singleCard   = document.getElementById("single-result-card");
+  const singleErrCard= document.getElementById("single-error-card");
 
   document.getElementById("sample-btn").addEventListener("click", () => {
     featureInput.value = sampleFeatures.join(", ");
   });
 
   document.getElementById("single-predict-btn").addEventListener("click", async () => {
-    setChip(singleStatus, "Running…", "warning");
+    setChip(singleStatus, "Đang xử lý…", "warning");
+    singleCard.classList.remove("visible");
+    singleErrCard.classList.remove("visible");
     try {
       const values = featureInput.value.split(/[\s,]+/).filter(Boolean).map(Number);
-      if (values.length !== EXPECTED || values.some(isNaN)) throw new Error(`Expected ${EXPECTED} numeric values.`);
+      if (values.length !== EXPECTED || values.some(isNaN)) throw new Error("Cần nhập đúng " + EXPECTED + " giá trị số.");
       const res = await fetch(PREDICT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -371,21 +426,29 @@
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
-      // Map labels
-      if (payload.predicted_class !== undefined) payload.predicted_class = labelClass(payload.predicted_class);
-      if (payload.predictions) payload.predictions = payload.predictions.map(labelClass);
-      singleOutput.textContent = JSON.stringify(payload, null, 2);
-      setChip(singleStatus, payload.cached ? "Cached" : "Done", "success");
+
+      const cls = payload.predicted_class || (payload.predictions && payload.predictions[0]) || "unknown";
+      const info = getInfo(cls);
+      document.getElementById("res-icon").textContent = info.icon;
+      document.getElementById("res-name").textContent = info.vi;
+      document.getElementById("res-name").style.color = info.color;
+      document.getElementById("res-en").textContent = info.en;
+      document.getElementById("res-desc").textContent = info.desc;
+      const cachedBadge = document.getElementById("res-cached");
+      cachedBadge.style.display = payload.cached ? "inline" : "none";
+      singleCard.classList.add("visible");
+      setChip(singleStatus, payload.cached ? "📦 Từ cache" : "✅ Xong", "success");
     } catch (err) {
-      singleOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
-      setChip(singleStatus, "Error", "danger");
+      document.getElementById("single-error-msg").textContent = err.message;
+      singleErrCard.classList.add("visible");
+      setChip(singleStatus, "Lỗi", "danger");
     }
   });
 
-  // ── Batch CSV ────────────────────────────────────────────────────────
+  // ── Batch CSV ────────────────────────────────────────────────────
   let batchRows = null;
   const batchFile = document.getElementById("batch-file");
-  const batchBtn = document.getElementById("batch-predict-btn");
+  const batchBtn  = document.getElementById("batch-predict-btn");
   const batchStatus = document.getElementById("batch-status");
   const batchBody = document.getElementById("batch-results-body");
   const batchDlBtn = document.getElementById("batch-download-btn");
@@ -398,23 +461,22 @@
     document.getElementById("batch-file-info").classList.remove("d-none");
     const text = await file.text();
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    // Detect header: skip if first row contains non-numeric
     const firstRow = parseCSVRow(lines[0]);
     const hasHeader = firstRow.some(isNaN);
     const dataLines = hasHeader ? lines.slice(1) : lines;
     batchRows = dataLines.map(parseCSVRow);
-    document.getElementById("batch-row-count").textContent = `${batchRows.length} rows`;
+    document.getElementById("batch-row-count").textContent = batchRows.length + " hàng";
     batchBtn.disabled = false;
-    setChip(batchStatus, `${batchRows.length} rows loaded`, "");
+    setChip(batchStatus, batchRows.length + " hàng đã tải", "");
   });
 
   batchBtn.addEventListener("click", async () => {
     if (!batchRows) return;
-    setChip(batchStatus, "Running…", "warning");
-    batchBody.innerHTML = '<tr><td colspan="2" class="text-muted">Processing…</td></tr>';
+    setChip(batchStatus, "Đang xử lý…", "warning");
+    batchBody.innerHTML = '<tr><td colspan="3" class="text-muted">Đang xử lý…</td></tr>';
     try {
       const invalid = batchRows.find(r => r.length !== EXPECTED || r.some(isNaN));
-      if (invalid) throw new Error(`Each row must have ${EXPECTED} numeric columns.`);
+      if (invalid) throw new Error("Mỗi hàng phải có đúng " + EXPECTED + " cột số.");
       const chunks = [];
       for (let i = 0; i < batchRows.length; i += 256) chunks.push(batchRows.slice(i, i + 256));
       batchResultData = [];
@@ -428,30 +490,41 @@
         if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
         batchResultData.push(...payload.predictions);
       }
-      batchBody.innerHTML = batchResultData.map((p, i) =>
-        `<tr><td>${i + 1}</td><td><span class="chip chip-soft">${labelClass(p)}</span></td></tr>`
-      ).join("");
+      batchBody.innerHTML = batchResultData.map((cls, i) => {
+        const info = getInfo(cls);
+        return '<tr><td>' + (i+1) + '</td>'
+          + '<td><code>' + cls + '</code></td>'
+          + '<td><span style="display:inline-flex;align-items:center;gap:4px">'
+          + '<span style="font-size:1.1rem">' + info.icon + '</span>'
+          + '<strong style="color:' + info.color + '">' + info.vi + '</strong>'
+          + '</span></td></tr>';
+      }).join("");
       batchDlBtn.classList.remove("d-none");
-      setChip(batchStatus, `${batchResultData.length} predictions`, "success");
+      setChip(batchStatus, batchResultData.length + " dự đoán", "success");
     } catch (err) {
-      batchBody.innerHTML = `<tr><td colspan="2" class="text-danger">${err.message}</td></tr>`;
-      setChip(batchStatus, "Error", "danger");
+      batchBody.innerHTML = '<tr><td colspan="3" class="text-danger">' + err.message + '</td></tr>';
+      setChip(batchStatus, "Lỗi", "danger");
     }
   });
 
   batchDlBtn.addEventListener("click", () => {
-    const csv = "row,predicted_class\n" + batchResultData.map((p, i) => `${i + 1},${labelClass(p)}`).join("\n");
+    const csv = "row,predicted_class,vi_name\n" + batchResultData.map((cls, i) => {
+      const info = getInfo(cls);
+      return (i+1) + "," + cls + "," + info.vi;
+    }).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-    a.download = "predictions.csv"; a.click();
+    a.download = "ket_qua_du_doan.csv"; a.click();
   });
 
-  // ── EDF file ─────────────────────────────────────────────────────────
-  const edfFile = document.getElementById("edf-file");
-  const edfBtn = document.getElementById("edf-predict-btn");
-  const edfStatus = document.getElementById("edf-status");
-  const edfOutput = document.getElementById("edf-output");
-  const edfProgress = document.getElementById("edf-progress");
+  // ── EDF file ─────────────────────────────────────────────────────
+  const edfFile    = document.getElementById("edf-file");
+  const edfBtn     = document.getElementById("edf-predict-btn");
+  const edfStatus  = document.getElementById("edf-status");
+  const edfProgress= document.getElementById("edf-progress");
+  const edfCard    = document.getElementById("edf-result-card");
+  const edfErrCard = document.getElementById("edf-error-card");
+  const edfBreakdown = document.getElementById("edf-breakdown");
 
   edfFile.addEventListener("change", (e) => {
     const file = e.target.files[0];
@@ -459,14 +532,17 @@
     document.getElementById("edf-file-name").textContent = file.name;
     document.getElementById("edf-file-info").classList.remove("d-none");
     edfBtn.disabled = false;
-    setChip(edfStatus, "File loaded", "");
+    setChip(edfStatus, "Đã chọn file", "");
   });
 
   edfBtn.addEventListener("click", async () => {
     const file = edfFile.files[0];
     if (!file) return;
-    setChip(edfStatus, "Processing…", "warning");
+    setChip(edfStatus, "Đang xử lý…", "warning");
     edfProgress.classList.remove("d-none");
+    edfCard.classList.remove("visible");
+    edfErrCard.classList.remove("visible");
+    edfBreakdown.classList.add("d-none");
     edfBtn.disabled = true;
     try {
       const formData = new FormData();
@@ -474,26 +550,51 @@
       const res = await fetch(PREDICT_EDF_URL, { method: "POST", body: formData });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
-      // Map labels
-      if (payload.predictions) payload.predictions = payload.predictions.map(labelClass);
-      if (payload.predicted_class) payload.predicted_class = labelClass(payload.predicted_class);
-      edfOutput.textContent = JSON.stringify(payload, null, 2);
-      setChip(edfStatus, `${(payload.prediction_count || 0)} epochs`, "success");
+
+      const cls = payload.predicted_class || "unknown";
+      const info = getInfo(cls);
+      document.getElementById("edf-icon").textContent = info.icon;
+      document.getElementById("edf-name").textContent = info.vi;
+      document.getElementById("edf-name").style.color = info.color;
+      document.getElementById("edf-en").textContent = info.en;
+      document.getElementById("edf-desc").textContent = "Tổng số epoch: " + (payload.prediction_count || 0);
+      edfCard.classList.add("visible");
+
+      if (payload.class_counts && Object.keys(payload.class_counts).length > 0) {
+        const total = payload.prediction_count || 1;
+        document.getElementById("edf-breakdown-list").innerHTML = Object.entries(payload.class_counts)
+          .sort((a,b) => b[1]-a[1])
+          .map(([k, v]) => {
+            const inf = getInfo(k);
+            const pct = ((v/total)*100).toFixed(1);
+            return '<div class="d-flex align-items-center gap-2 mb-1" style="font-size:0.85rem">'
+              + '<span style="font-size:1rem">' + inf.icon + '</span>'
+              + '<span style="min-width:140px;color:' + inf.color + ';font-weight:600">' + inf.vi + '</span>'
+              + '<div style="flex:1;height:8px;background:#e0e0e0;border-radius:999px">'
+              + '<div style="width:' + pct + '%;height:100%;background:' + inf.color + ';border-radius:999px"></div>'
+              + '</div>'
+              + '<span style="min-width:50px;text-align:right">' + v + ' (' + pct + '%)</span>'
+              + '</div>';
+          }).join("");
+        edfBreakdown.classList.remove("d-none");
+      }
+      setChip(edfStatus, (payload.prediction_count || 0) + " epoch", "success");
     } catch (err) {
-      edfOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
-      setChip(edfStatus, "Error", "danger");
+      document.getElementById("edf-error-msg").textContent = err.message;
+      edfErrCard.classList.add("visible");
+      setChip(edfStatus, "Lỗi", "danger");
     } finally {
       edfProgress.classList.add("d-none");
       edfBtn.disabled = false;
     }
   });
 
-  // ── JSON editor ──────────────────────────────────────────────────────
+  // ── JSON editor ──────────────────────────────────────────────────
   const jsonStatus = document.getElementById("json-status");
   const jsonOutput = document.getElementById("json-output");
 
   document.getElementById("json-send-btn").addEventListener("click", async () => {
-    setChip(jsonStatus, "Sending…", "warning");
+    setChip(jsonStatus, "Đang gửi…", "warning");
     try {
       const body = JSON.parse(document.getElementById("json-editor").value);
       const res = await fetch(PREDICT_URL, {
@@ -503,13 +604,11 @@
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
-      if (payload.predicted_class !== undefined) payload.predicted_class = labelClass(payload.predicted_class);
-      if (payload.predictions) payload.predictions = payload.predictions.map(labelClass);
       jsonOutput.textContent = JSON.stringify(payload, null, 2);
-      setChip(jsonStatus, "Done", "success");
+      setChip(jsonStatus, "✅ Xong", "success");
     } catch (err) {
       jsonOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
-      setChip(jsonStatus, "Error", "danger");
+      setChip(jsonStatus, "Lỗi", "danger");
     }
   });
 </script>
