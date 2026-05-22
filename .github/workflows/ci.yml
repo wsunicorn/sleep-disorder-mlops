@@ -18,6 +18,7 @@ env:
   ECS_CLUSTER: sleep-portal-cluster
   ECS_SERVICE: sleep-portal-service
   MODEL_ARTIFACT_S3_URI: s3://sleep-mlops-651709/models
+  MLOPS_FEATURE_STORE_S3_URI: s3://sleep-mlops-651709/monitoring/current
 
 jobs:
   # ─── Job 1: Unit Tests ──────────────────────────────────────
@@ -134,11 +135,60 @@ jobs:
       - name: Ensure public ALB
         run: bash scripts/ensure_aws_alb.sh
 
+      - name: Register ECS task definition
+        id: task-def
+        run: |
+          CURRENT_TASK_DEF=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].taskDefinition" \
+            --output text)
+          aws ecs describe-task-definition \
+            --task-definition "$CURRENT_TASK_DEF" \
+            --query "taskDefinition" > current-task-definition.json
+
+          jq \
+            --arg IMAGE "${{ needs.build-and-push.outputs.image }}" \
+            --arg MODEL_ARTIFACT_S3_URI "$MODEL_ARTIFACT_S3_URI" \
+            --arg MLOPS_FEATURE_STORE_S3_URI "$MLOPS_FEATURE_STORE_S3_URI" \
+            '
+            def upsert_env($name; $value):
+              .environment = ((.environment // []) | map(select(.name != $name)) + [{"name": $name, "value": $value}]);
+
+            .containerDefinitions |= map(
+              if .name == "sleep-portal" then
+                .image = $IMAGE
+                | upsert_env("MODEL_ARTIFACT_S3_URI"; $MODEL_ARTIFACT_S3_URI)
+                | upsert_env("MLOPS_FEATURE_STORE_S3_URI"; $MLOPS_FEATURE_STORE_S3_URI)
+              else
+                .
+              end
+            )
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy,
+                .deregisteredAt
+              )
+            ' current-task-definition.json > new-task-definition.json
+
+          NEW_TASK_DEF=$(aws ecs register-task-definition \
+            --cli-input-json file://new-task-definition.json \
+            --query "taskDefinition.taskDefinitionArn" \
+            --output text)
+          echo "task_definition_arn=$NEW_TASK_DEF" >> "$GITHUB_OUTPUT"
+          echo "Registered task definition: $NEW_TASK_DEF"
+
       - name: Deploy to ECS
         run: |
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
+            --task-definition "${{ steps.task-def.outputs.task_definition_arn }}" \
             --desired-count 1 \
             --load-balancers "targetGroupArn=$TG_ARN,containerName=sleep-portal,containerPort=8000" \
             --force-new-deployment \

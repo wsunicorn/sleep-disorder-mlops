@@ -717,9 +717,10 @@ Luồng CI/CD hiện tại:
 3. Build Docker image [24].
 4. Push image lên ECR [27].
 5. Đảm bảo ALB/Target Group/Listener tồn tại.
-6. Update ECS Fargate service `desired-count 1` [26].
-7. Chạy `python manage.py migrate --noinput` bằng ECS one-off task.
-8. Smoke test `/health/` và `/model-info/`.
+6. Đăng ký ECS task definition revision mới với image SHA và biến MLOps (`MODEL_ARTIFACT_S3_URI`, `MLOPS_FEATURE_STORE_S3_URI`).
+7. Update ECS Fargate service sang task definition mới và `desired-count 1` [26].
+8. Chạy `python manage.py migrate --noinput` bằng ECS one-off task.
+9. Smoke test `/health/` và `/model-info/`.
 
 Ý nghĩa:
 
