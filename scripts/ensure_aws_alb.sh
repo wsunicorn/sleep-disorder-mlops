@@ -41,7 +41,16 @@ PUBLIC_SUBNET_IDS=$(aws ec2 describe-subnets \
 read -r -a PUBLIC_SUBNETS <<< "$PUBLIC_SUBNET_IDS"
 
 if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 || "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; then
-  echo "Could not find at least two public subnets tagged ${PROJECT_NAME}-public-*." >&2
+  echo "Could not find two tagged public subnets; checking route tables with an internet gateway."
+  PUBLIC_SUBNET_IDS=$(aws ec2 describe-route-tables \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
+    --query "RouteTables[?Routes[?DestinationCidrBlock=='0.0.0.0/0' && GatewayId!=null && starts_with(GatewayId, 'igw-')]].Associations[?SubnetId!=null].SubnetId[]" \
+    --output text)
+  read -r -a PUBLIC_SUBNETS <<< "$PUBLIC_SUBNET_IDS"
+fi
+
+if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 || "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; then
+  echo "Could not find at least two public subnets in VPC $VPC_ID." >&2
   echo "Recreate/import the Terraform network stack before restoring the ALB." >&2
   exit 1
 fi
@@ -168,4 +177,3 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "APP_URL=http://$ALB_DNS"
   } >> "$GITHUB_ENV"
 fi
-
