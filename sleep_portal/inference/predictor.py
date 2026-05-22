@@ -3,6 +3,7 @@
 import hashlib
 import json
 import pickle
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -20,8 +21,32 @@ _label_encoder = None
 _using_pkl_fallback = False
 
 
+class _MetadataLabelEncoder:
+    """Minimal inverse_transform fallback backed by metadata.json classes."""
+
+    def __init__(self, classes):
+        self.classes_ = list(classes)
+
+    def inverse_transform(self, values):
+        return [self.classes_[int(value)] for value in values]
+
+
+def _install_numpy_pickle_compat():
+    """Support artifacts pickled with NumPy 2 when serving with NumPy 1.x."""
+    try:
+        import numpy.core as numpy_core
+        import numpy.core.multiarray as numpy_multiarray
+        import numpy.core.numeric as numpy_numeric
+
+        sys.modules.setdefault("numpy._core", numpy_core)
+        sys.modules.setdefault("numpy._core.multiarray", numpy_multiarray)
+        sys.modules.setdefault("numpy._core.numeric", numpy_numeric)
+    except Exception:
+        pass
+
+
 def _load_label_encoder():
-    """Load label encoder từ models/label_encoder.pkl (nếu có)."""
+    """Load the label encoder from model artifacts when available."""
     global _label_encoder
     if _label_encoder is not None:
         return _label_encoder
@@ -32,45 +57,65 @@ def _load_label_encoder():
     ]
     for path in candidates:
         if path.exists():
-            with open(path, "rb") as f:
-                _label_encoder = pickle.load(f)
-            logger.info(f"Loaded label encoder from {path}")
-            return _label_encoder
+            try:
+                _install_numpy_pickle_compat()
+                with open(path, "rb") as f:
+                    _label_encoder = pickle.load(f)
+                logger.info(f"Loaded label encoder from {path}")
+                return _label_encoder
+            except Exception as exc:
+                logger.warning(f"Could not load label encoder from {path}: {exc}")
+
+    metadata_candidates = [
+        Path(settings.BASE_DIR).parent / "models" / "metadata.json",
+        Path(settings.BASE_DIR) / "models" / "metadata.json",
+        Path("/app/models/metadata.json"),
+    ]
+    for path in metadata_candidates:
+        if path.exists():
+            try:
+                metadata = json.loads(path.read_text(encoding="utf-8"))
+                classes = metadata.get("classes")
+                if classes:
+                    _label_encoder = _MetadataLabelEncoder(classes)
+                    logger.info(f"Loaded label classes from {path}")
+                    return _label_encoder
+            except Exception as exc:
+                logger.warning(f"Could not load label classes from {path}: {exc}")
     return None
 
 
-def _load_feature_names() -> list:
-    """Load feature names từ models/feature_names.json (nếu có), fallback về số lượng mặc định."""
+def _load_feature_names() -> list | None:
+    """Load feature names from model artifacts when available."""
     global _feature_names
     if _feature_names is not None:
         return _feature_names
-    # BASE_DIR là thư mục gốc project (parent của sleep_portal/)
     candidates = [
         Path(settings.BASE_DIR).parent / "models" / "feature_names.json",
         Path(settings.BASE_DIR) / "models" / "feature_names.json",
+        Path("/app/models/feature_names.json"),
     ]
     for path in candidates:
         if path.exists():
             _feature_names = json.loads(path.read_text())
             logger.info(f"Loaded {len(_feature_names)} feature names from {path}")
             return _feature_names
-    # fallback: trả về None → serializer dùng giá trị mặc định
     return None
 
 
 def get_feature_count() -> int:
-    """Trả về số features mà model hiện tại cần."""
+    """Return the feature count expected by the current model."""
     names = _load_feature_names()
     return len(names) if names else 24
 
 
 def _get_model():
-    """Singleton: load model từ MLflow Registry; fallback pkl nếu registry lỗi."""
+    """Singleton: load the model from MLflow Registry, then pkl fallback."""
     global _model, _label_encoder, _using_pkl_fallback
     if _model is not None:
         return _model
 
-    # Thử load qua MLflow model registry
+    # Try MLflow model registry first.
     try:
         model_uri = (
             f"models:/{settings.MLFLOW_MODEL_NAME}/{settings.MLFLOW_MODEL_STAGE}"
@@ -83,7 +128,7 @@ def _get_model():
     except Exception as mlflow_exc:
         logger.warning(f"MLflow registry load failed ({mlflow_exc}); trying pkl fallback.")
 
-    # Fallback: load model.pkl trực tiếp
+    # Fallback: load model.pkl directly.
     candidates = [
         Path(settings.BASE_DIR).parent / "models" / "model.pkl",
         Path(settings.BASE_DIR) / "models" / "model.pkl",
@@ -92,6 +137,7 @@ def _get_model():
     for pkl_path in candidates:
         if pkl_path.exists():
             logger.info(f"Loading model from pkl: {pkl_path}")
+            _install_numpy_pickle_compat()
             with open(pkl_path, "rb") as f:
                 _model = pickle.load(f)
             _using_pkl_fallback = True
@@ -130,29 +176,34 @@ def get_model_status() -> dict:
 
 def predict(features: np.ndarray) -> dict:
     """
-    Chạy prediction cho một epoch.
+    Run prediction for one or more feature rows.
 
     Args:
         features: numpy array shape (1, n_features)
 
     Returns:
-        dict với keys: predicted_class, probabilities, cached
+        dict with predicted_class, predictions, prediction_count, class_counts, cached.
     """
-    # Tạo cache key từ features hash
+    # Build a cache key from the feature payload.
     features_hash = hashlib.sha256(features.tobytes()).hexdigest()
     cache_key = f"pred:{features_hash}"
 
-    # Kiểm tra cache trước
+    # Check cache first.
     cached = cache.get(cache_key)
     if cached is not None:
         cached["cached"] = True
         return cached
 
     model = _get_model()
-    preds = model.predict(pd.DataFrame(features))
+    feature_names = _load_feature_names()
+    if feature_names and features.shape[1] == len(feature_names):
+        model_input = pd.DataFrame(features, columns=feature_names)
+    else:
+        model_input = pd.DataFrame(features)
+    preds = model.predict(model_input)
     raw = np.asarray(preds).reshape(-1)
 
-    # Decode integer class indices → class names using label encoder
+    # Decode integer class indices to class names using the label encoder.
     le = _load_label_encoder()
     try:
         if le is not None and np.issubdtype(raw.dtype, np.integer):
@@ -172,6 +223,6 @@ def predict(features: np.ndarray) -> dict:
         "cached": False,
     }
 
-    # Lưu vào Redis cache (1 giờ)
+    # Store in Redis cache for 1 hour.
     cache.set(cache_key, result, timeout=3600)
     return result

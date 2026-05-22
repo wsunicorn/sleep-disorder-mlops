@@ -6,7 +6,7 @@ def _get_feature_count() -> int:
         from inference.predictor import get_feature_count
         return get_feature_count()
     except Exception:
-        return 18  # default fallback
+        return 24  # Kaggle CAP notebook feature schema
 
 
 class PredictRequestSerializer(serializers.Serializer):

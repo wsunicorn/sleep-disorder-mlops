@@ -129,14 +129,12 @@
           <table class="table table-theme table-sm">
             <thead><tr><th>#</th><th>Đặc trưng</th><th>Mô tả</th></tr></thead>
             <tbody>
-              <tr><td>0–4</td><td>ch0_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 0</td></tr>
-              <tr><td>5–9</td><td>ch1_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 1</td></tr>
-              <tr><td>10–14</td><td>ch2_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 2</td></tr>
-              <tr><td>15–19</td><td>ch3_delta/theta/alpha/beta/gamma_rel</td><td>Công suất dải tần tương đối — kênh 3</td></tr>
-              <tr><td>20</td><td>spectral_entropy_mean</td><td>Độ phức tạp của tín hiệu</td></tr>
-              <tr><td>21</td><td>peak_frequency_mean</td><td>Tần số trội (Hz)</td></tr>
-              <tr><td>22</td><td>amplitude_mean</td><td>Biên độ trung bình tuyệt đối</td></tr>
-              <tr><td>23</td><td>rms</td><td>Biên độ hiệu dụng (RMS)</td></tr>
+              <tr><td>0–9</td><td>delta/theta/alpha/beta/gamma_power + _rel</td><td>Công suất tuyệt đối và tương đối của 5 dải tần EEG</td></tr>
+              <tr><td>10–12</td><td>spectral_entropy, peak_frequency, mean_frequency</td><td>Độ phức tạp phổ, tần số trội và tần số trung bình</td></tr>
+              <tr><td>13–15</td><td>amplitude_mean, amplitude_std, rms</td><td>Thống kê biên độ trong miền thời gian</td></tr>
+              <tr><td>16–17</td><td>delta_beta_ratio, theta_alpha_ratio</td><td>Tỉ lệ giữa các dải tần liên quan đến trạng thái ngủ</td></tr>
+              <tr><td>18–20</td><td>skewness, kurtosis, zero_crossing_rate</td><td>Dạng phân phối và mức dao động qua trục 0</td></tr>
+              <tr><td>21–23</td><td>hjorth_activity, hjorth_mobility, hjorth_complexity</td><td>Bộ chỉ số Hjorth mô tả độ biến thiên và phức tạp của sóng</td></tr>
             </tbody>
           </table>
         </div>
@@ -293,12 +291,10 @@
   -H "Content-Type: application/json" \
   -d '{
     "features": [[
-      0.10, 0.05, 0.03, 0.02,
-      0.10, 0.05, 0.03, 0.02,
-      0.10, 0.05, 0.03, 0.02,
-      0.10, 0.05, 0.03, 0.02,
-      1.5, 5.0, 0.8, 0.5,
-      0.9, 0.7, 2.0, 1.5
+      0.0012, 0.30, 0.0008, 0.20, 0.0005, 0.13,
+      0.0009, 0.22, 0.0004, 0.10, 1.85, 3.2,
+      6.4, 0.018, 0.024, 0.030, 1.33, 1.60,
+      0.12, 2.80, 0.045, 0.0006, 0.31, 2.10
     ]]
   }'</pre>
           <h5 class="mt-3">POST /api/v1/predict-edf/</h5>
@@ -344,12 +340,10 @@
           <div class="col-lg-7">
             <textarea id="json-editor" class="form-control studio-textarea" rows="10" spellcheck="false">{
   "features": [[
-    0.10, 0.05, 0.03, 0.02,
-    0.10, 0.05, 0.03, 0.02,
-    0.10, 0.05, 0.03, 0.02,
-    0.10, 0.05, 0.03, 0.02,
-    1.5, 5.0, 0.8, 0.5,
-    0.9, 0.7, 2.0, 1.5
+    0.0012, 0.30, 0.0008, 0.20, 0.0005, 0.13,
+    0.0009, 0.22, 0.0004, 0.10, 1.85, 3.2,
+    6.4, 0.018, 0.024, 0.030, 1.33, 1.60,
+    0.12, 2.80, 0.045, 0.0006, 0.31, 2.10
   ]]
 }</textarea>
             <button class="btn btn-accent btn-pill mt-2" id="json-send-btn" type="button">Gửi yêu cầu</button>

@@ -20,7 +20,7 @@ SAGEMAKER_ROLE = os.getenv("SAGEMAKER_ROLE_ARN")  # IAM role ARN
 
 
 def launch_training_job(
-    model_type: str = "xgboost",
+    model_type: str = "all",
     instance_type: str = "ml.m5.xlarge",
 ):
     """Launch SageMaker training job."""
@@ -60,7 +60,7 @@ def launch_training_job(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-type", default="xgboost")
+    parser.add_argument("--model-type", default="all")
     parser.add_argument("--instance-type", default="ml.m5.xlarge")
     args = parser.parse_args()
 

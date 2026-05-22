@@ -132,7 +132,7 @@ def predict_page(request):
         from inference.predictor import get_feature_count
         feature_count = get_feature_count()
     except Exception:
-        feature_count = 18
+        feature_count = 24
     return render(
         request,
         "dashboard/predict.html",

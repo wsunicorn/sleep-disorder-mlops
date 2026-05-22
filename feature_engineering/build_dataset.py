@@ -1,7 +1,8 @@
-"""
-Feature Engineering — Gắn nhãn sleep stage cho từng epoch.
-Join features.parquet với annotation .txt → dataset có label thực tế.
-Task: Sleep Stage Classification (Wake / S1 / S2 / S3 / S4 / REM)
+"""Optional legacy helper for sleep-stage annotation experiments.
+
+The production 7-disorder pipeline is defined by cap_features.py and train.py.
+This script is kept only for CAP annotation analysis: it joins features.parquet
+with CAP .txt annotations to build a Wake/S1/S2/S3/S4/REM dataset.
 """
 
 import argparse
@@ -9,7 +10,10 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from loguru import logger
-from annotation_parser import parse_txt_annotation, EVENT_TO_STAGE
+try:
+    from feature_engineering.annotation_parser import parse_txt_annotation
+except ModuleNotFoundError:
+    from annotation_parser import parse_txt_annotation
 
 STAGE_NAMES = {0: "Wake", 1: "S1", 2: "S2", 3: "S3", 4: "S4", 5: "REM", 6: "Movement"}
 EPOCH_DURATION = 30.0

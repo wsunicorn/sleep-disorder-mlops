@@ -1,4 +1,17 @@
+features:
+  sfreq: 512
+  window_samples: 1024
+
 train:
+  data_dir: data/raw/balanced_CAP
   test_size: 0.2
   random_seed: 42
-  model_type: xgboost
+  model_type: all
+  max_per_class:
+    healthy:
+    nfle: 20000
+    insomnia:
+    narcolepsy:
+    plm:
+    rbd: 20000
+    sdb:

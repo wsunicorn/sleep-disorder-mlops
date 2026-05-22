@@ -32,7 +32,7 @@ jobs:
             --task-definition sleep-portal-task \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[subnet-045cfee5dd9f717c9,subnet-05c7350c915514a4c],securityGroups=[sg-09b79fe4b58c9b329],assignPublicIp=ENABLED}" \
-            --overrides '{"containerOverrides":[{"name":"sleep-portal","command":["python","training/train.py","--retrain"]}]}' \
+            --overrides '{"containerOverrides":[{"name":"sleep-portal","command":["python","training/train.py","--retrain","--data-dir","data/raw/balanced_CAP","--model-dir","models","--model-type","all"]}]}' \
             --query "tasks[0].taskArn" --output text
 
       - name: Notify

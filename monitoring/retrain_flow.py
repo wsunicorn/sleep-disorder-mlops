@@ -68,7 +68,8 @@ def run_training(features_path: str) -> str:
         [
             "python", "training/train.py",
             "--data-dir", features_path,
-            "--model-type", "xgboost",
+            "--model-type", "all",
+            "--retrain",
         ],
         capture_output=True,
         text=True,

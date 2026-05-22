@@ -87,6 +87,9 @@ jobs:
           mkdir -p models
           aws s3 cp s3://sleep-mlops-651709/models/model.pkl models/model.pkl || echo "model.pkl not in S3, skipping"
           aws s3 cp s3://sleep-mlops-651709/models/model.ubj models/model.ubj || echo "model.ubj not in S3, skipping"
+          aws s3 cp s3://sleep-mlops-651709/models/label_encoder.pkl models/label_encoder.pkl || echo "label_encoder.pkl not in S3, using repo copy"
+          aws s3 cp s3://sleep-mlops-651709/models/feature_names.json models/feature_names.json || echo "feature_names.json not in S3, using repo copy"
+          aws s3 cp s3://sleep-mlops-651709/models/metadata.json models/metadata.json || echo "metadata.json not in S3, using repo copy"
           ls -lh models/
 
       - name: Login to Amazon ECR
@@ -124,20 +127,39 @@ jobs:
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
+            --desired-count 1 \
             --force-new-deployment \
             --query 'service.deployments[0].status' \
             --output text
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
 
       - name: Run Django migrate
         env:
           MIGRATE_OVERRIDES: >-
             {"containerOverrides":[{"name":"sleep-portal","command":["python","manage.py","migrate","--noinput"]}]}
         run: |
+          SUBNETS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].networkConfiguration.awsvpcConfiguration.subnets" \
+            --output text | tr '\t' ',')
+          SECURITY_GROUPS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].networkConfiguration.awsvpcConfiguration.securityGroups" \
+            --output text | tr '\t' ',')
+          ASSIGN_PUBLIC_IP=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].networkConfiguration.awsvpcConfiguration.assignPublicIp" \
+            --output text)
           TASK_ARN=$(aws ecs run-task \
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition sleep-portal-task \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[subnet-045cfee5dd9f717c9,subnet-05c7350c915514a4c],securityGroups=[sg-09b79fe4b58c9b329],assignPublicIp=ENABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=$ASSIGN_PUBLIC_IP}" \
             --overrides "$MIGRATE_OVERRIDES" \
             --query "tasks[0].taskArn" --output text)
           echo "Migrate task: $TASK_ARN"

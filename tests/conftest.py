@@ -34,14 +34,14 @@ def sample_epoch():
 
 @pytest.fixture
 def sample_features():
-    """Single epoch feature vector (shape 1×43)."""
+    """Single epoch feature vector (shape 1 x 24)."""
     np.random.seed(42)
     return np.random.randn(1, 24).astype(np.float32)
 
 
 @pytest.fixture
 def batch_features():
-    """Batch of 5 epoch feature vectors (shape 5×43)."""
+    """Batch of 5 epoch feature vectors (shape 5 x 24)."""
     np.random.seed(0)
     return np.random.randn(5, 24).astype(np.float32)
 

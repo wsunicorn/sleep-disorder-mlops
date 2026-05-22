@@ -19,6 +19,8 @@ lightgbm==4.3.0
 numpy==1.26.4
 pandas==2.2.2
 scipy==1.13.0
+mne==1.6.1
+pyedflib==0.1.37
 
 # MLflow (model loading từ S3/local)
 mlflow==2.13.0

@@ -43,21 +43,20 @@ class TestFeatureExtraction:
         assert bp >= 0
 
     def test_spectral_entropy_bounded(self, sample_epoch):
-        from feature_engineering.extract_features import spectral_entropy
-        from scipy import signal
-        freqs, psd = signal.welch(sample_epoch[0], fs=256, nperseg=256)
-        se = spectral_entropy(psd)
-        assert se >= 0
+        from feature_engineering.cap_features import extract_features
+        features = extract_features(sample_epoch[0][:1024], sfreq=256.0)
+        assert features["spectral_entropy"] >= 0
 
     def test_extract_epoch_features_returns_dict(self, sample_epoch):
-        from feature_engineering.extract_features import extract_epoch_features
-        features = extract_epoch_features(sample_epoch, sfreq=256.0)
+        from feature_engineering.cap_features import FEATURE_NAMES, extract_features
+        features = extract_features(sample_epoch[0][:1024], sfreq=256.0)
         assert isinstance(features, dict)
-        assert "delta_power_mean" in features
-        assert "theta_power_mean" in features
-        assert "alpha_power_mean" in features
-        assert "beta_power_mean" in features
-        assert "spectral_entropy_mean" in features
+        assert list(features.keys()) == FEATURE_NAMES
+        assert "delta_power" in features
+        assert "theta_power" in features
+        assert "alpha_power" in features
+        assert "beta_power" in features
+        assert "spectral_entropy" in features
         assert "delta_beta_ratio" in features
 
     def test_label_from_filename(self):
