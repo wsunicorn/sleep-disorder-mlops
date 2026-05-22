@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+from django.conf import settings
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny
@@ -193,6 +194,8 @@ class IngestView(APIView):
 
     def post(self, request):
         from dashboard.models import Patient, EpochPrediction
+        from feature_engineering.cap_features import FEATURE_NAMES
+        from monitoring.feature_store import write_ingest_feature_batch
 
         patient_id = request.data.get("patient_id", "").strip()
         if not patient_id:
@@ -247,9 +250,24 @@ class IngestView(APIView):
                 logger.warning(f"Ingest: skip epoch {ep}: {exc}")
                 skipped += 1
 
+        feature_store_result = {"rows": 0, "local_path": None, "s3_uri": None}
+        try:
+            feature_store_result = write_ingest_feature_batch(
+                patient_id=patient_id,
+                diagnosis=disorder,
+                epochs=epochs_data,
+                feature_names=FEATURE_NAMES,
+                local_dir=settings.MLOPS_FEATURE_STORE_LOCAL_DIR,
+                s3_uri=settings.MLOPS_FEATURE_STORE_S3_URI,
+                aws_region=settings.AWS_DEFAULT_REGION,
+            )
+        except Exception as exc:
+            logger.warning(f"Ingest feature store write failed: {exc}")
+
         logger.info(
             f"Ingest: patient={patient_id} ({'created' if created else 'updated'}), "
-            f"epochs saved={saved}, skipped={skipped}"
+            f"epochs saved={saved}, skipped={skipped}, "
+            f"feature rows={feature_store_result.get('rows', 0)}"
         )
         return Response(
             {
@@ -258,6 +276,8 @@ class IngestView(APIView):
                 "diagnosis": disorder,
                 "epochs_saved": saved,
                 "epochs_skipped": skipped,
+                "feature_rows_saved": feature_store_result.get("rows", 0),
+                "feature_store": feature_store_result,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )

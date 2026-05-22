@@ -5,12 +5,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Optional reason for manual deploy"
+        required: false
+        default: "Manual CI/CD run"
 
 env:
   AWS_REGION: ap-southeast-1
   ECR_REPOSITORY: sleep-portal
   ECS_CLUSTER: sleep-portal-cluster
   ECS_SERVICE: sleep-portal-service
+  MODEL_ARTIFACT_S3_URI: s3://sleep-mlops-651709/models
 
 jobs:
   # ─── Job 1: Unit Tests ──────────────────────────────────────
@@ -85,11 +92,11 @@ jobs:
       - name: Download model artifacts from S3
         run: |
           mkdir -p models
-          aws s3 cp s3://sleep-mlops-651709/models/model.pkl models/model.pkl || echo "model.pkl not in S3, skipping"
-          aws s3 cp s3://sleep-mlops-651709/models/model.ubj models/model.ubj || echo "model.ubj not in S3, skipping"
-          aws s3 cp s3://sleep-mlops-651709/models/label_encoder.pkl models/label_encoder.pkl || echo "label_encoder.pkl not in S3, using repo copy"
-          aws s3 cp s3://sleep-mlops-651709/models/feature_names.json models/feature_names.json || echo "feature_names.json not in S3, using repo copy"
-          aws s3 cp s3://sleep-mlops-651709/models/metadata.json models/metadata.json || echo "metadata.json not in S3, using repo copy"
+          aws s3 cp "$MODEL_ARTIFACT_S3_URI/model.pkl" models/model.pkl || echo "model.pkl not in S3, skipping"
+          aws s3 cp "$MODEL_ARTIFACT_S3_URI/model.ubj" models/model.ubj || echo "model.ubj not in S3, skipping"
+          aws s3 cp "$MODEL_ARTIFACT_S3_URI/label_encoder.pkl" models/label_encoder.pkl || echo "label_encoder.pkl not in S3, using repo copy"
+          aws s3 cp "$MODEL_ARTIFACT_S3_URI/feature_names.json" models/feature_names.json || echo "feature_names.json not in S3, using repo copy"
+          aws s3 cp "$MODEL_ARTIFACT_S3_URI/metadata.json" models/metadata.json || echo "metadata.json not in S3, using repo copy"
           ls -lh models/
 
       - name: Login to Amazon ECR

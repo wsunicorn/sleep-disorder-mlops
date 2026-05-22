@@ -64,10 +64,12 @@ services:
       DJANGO_SECRET_KEY: local-dev-secret-key
       DATABASE_URL: postgresql://sleepuser:sleeppass@db:5432/sleepdb
       REDIS_URL: redis://redis:6379/0
-      MLFLOW_TRACKING_URI: mlruns
+      MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: sleep-disorder-classifier
       MLFLOW_MODEL_STAGE: "None"
       MQTT_BROKER_HOST: mqtt
+      MODEL_ARTIFACT_LOCAL_DIR: /app/models
+      MLOPS_FEATURE_STORE_LOCAL_DIR: /app/data/monitoring/current
     depends_on:
       - db
       - redis

@@ -48,3 +48,27 @@ resource "aws_iam_role_policy" "ecs_task_cloudwatch" {
     ]
   })
 }
+
+# Allow the app container to download model artifacts and upload ingested feature batches.
+resource "aws_iam_role_policy" "ecs_task_s3_mlops" {
+  name = "${var.project}-ecs-s3-mlops"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
+        ]
+        Resource = [
+          "arn:aws:s3:::sleep-mlops-651709",
+          "arn:aws:s3:::sleep-mlops-651709/*",
+        ]
+      }
+    ]
+  })
+}

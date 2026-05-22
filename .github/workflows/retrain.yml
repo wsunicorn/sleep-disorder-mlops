@@ -1,22 +1,52 @@
-name: Manual Retrain Trigger
+name: Retrain - Promote - Redeploy
 
 on:
   workflow_dispatch:
     inputs:
       reason:
-        description: "Lý do retrain (ví dụ: data drift detected)"
+        description: "Lý do retrain"
         required: false
         default: "Manual trigger"
+      training_data:
+        description: "Base training parquet/prefix, usually s3://.../features/reference/"
+        required: false
+        default: ""
+      extra_data:
+        description: "Optional new/current feature parquet/prefix to append"
+        required: false
+        default: ""
+      artifact_s3_uri:
+        description: "S3 prefix for serving artifacts"
+        required: false
+        default: ""
+      model_type:
+        description: "all, lightgbm, xgboost, or randomforest"
+        required: false
+        default: "all"
+      deploy_after_success:
+        description: "Trigger CI/CD deploy after artifacts are uploaded"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+  actions: write
 
 env:
   AWS_REGION: ap-southeast-1
-  ECS_CLUSTER: sleep-portal-cluster
+  DEFAULT_TRAINING_DATA: ${{ vars.RETRAIN_TRAINING_DATA || 's3://sleep-mlops-651709/features/reference/features.parquet' }}
+  DEFAULT_ARTIFACT_S3_URI: ${{ vars.MODEL_ARTIFACT_S3_URI || 's3://sleep-mlops-651709/models' }}
+  MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || 'mlruns' }}
+  MLFLOW_EXPERIMENT: ${{ vars.MLFLOW_EXPERIMENT || 'sleep-disorder-kaggle' }}
+  MLFLOW_MODEL_NAME: ${{ vars.MLFLOW_MODEL_NAME || 'sleep-disorder-classifier' }}
 
 jobs:
   retrain:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -24,16 +54,76 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Trigger retrain ECS task
-        run: |
-          echo "Triggering retrain: ${{ github.event.inputs.reason }}"
-          aws ecs run-task \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --task-definition sleep-portal-task \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[subnet-045cfee5dd9f717c9,subnet-05c7350c915514a4c],securityGroups=[sg-09b79fe4b58c9b329],assignPublicIp=ENABLED}" \
-            --overrides '{"containerOverrides":[{"name":"sleep-portal","command":["python","training/train.py","--retrain","--data-dir","data/raw/balanced_CAP","--model-dir","models","--model-type","all"]}]}' \
-            --query "tasks[0].taskArn" --output text
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-      - name: Notify
-        run: echo "Retrain task submitted at $(date -u)"
+      - name: Install training dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-prod.txt
+
+      - name: Resolve retrain inputs
+        id: retrain-inputs
+        shell: bash
+        run: |
+          TRAINING_DATA="${{ inputs.training_data }}"
+          ARTIFACT_URI="${{ inputs.artifact_s3_uri }}"
+          MODEL_TYPE="${{ inputs.model_type }}"
+
+          if [ -z "$TRAINING_DATA" ]; then
+            TRAINING_DATA="$DEFAULT_TRAINING_DATA"
+          fi
+          if [ -z "$ARTIFACT_URI" ]; then
+            ARTIFACT_URI="$DEFAULT_ARTIFACT_S3_URI"
+          fi
+          if [ -z "$MODEL_TYPE" ]; then
+            MODEL_TYPE="all"
+          fi
+
+          echo "training_data=$TRAINING_DATA" >> "$GITHUB_OUTPUT"
+          echo "artifact_s3_uri=$ARTIFACT_URI" >> "$GITHUB_OUTPUT"
+          echo "model_type=$MODEL_TYPE" >> "$GITHUB_OUTPUT"
+          echo "Retrain reason: ${{ inputs.reason }}"
+          echo "Training data: $TRAINING_DATA"
+          echo "Extra data: ${{ inputs.extra_data }}"
+          echo "Artifact URI: $ARTIFACT_URI"
+          echo "Model type: $MODEL_TYPE"
+
+      - name: Run training
+        shell: bash
+        run: |
+          EXTRA_ARGS=()
+          if [ -n "${{ inputs.extra_data }}" ]; then
+            EXTRA_ARGS+=(--extra-data "${{ inputs.extra_data }}")
+          fi
+
+          python training/train.py \
+            --retrain \
+            --data-dir "${{ steps.retrain-inputs.outputs.training_data }}" \
+            --model-dir models \
+            --model-type "${{ steps.retrain-inputs.outputs.model_type }}" \
+            --artifact-s3-uri "${{ steps.retrain-inputs.outputs.artifact_s3_uri }}" \
+            "${EXTRA_ARGS[@]}"
+
+      - name: Upload retrain artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrain-artifacts
+          path: |
+            models/
+            metrics.json
+            mlruns/
+          if-no-files-found: ignore
+
+      - name: Trigger CI/CD redeploy
+        if: success() && inputs.deploy_after_success == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ci.yml \
+            --ref main \
+            -f reason="Retrain completed: ${{ inputs.reason }}"

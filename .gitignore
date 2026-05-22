@@ -15,10 +15,12 @@ build/
 data/raw/*
 data/processed/*
 data/features/*
+data/monitoring/*
 !data/raw/.gitkeep
 !data/raw/*.dvc
 !data/processed/.gitkeep
 !data/features/.gitkeep
+!data/monitoring/.gitkeep
 !.dvc/config
 !.dvc
 

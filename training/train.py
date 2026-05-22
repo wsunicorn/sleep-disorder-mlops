@@ -11,6 +11,7 @@ Source of truth: notebooks/kaggle_cap_training.ipynb
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import pickle
@@ -56,6 +57,59 @@ MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "sleep-disorder-kaggle")
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
 
 
+def _parse_s3_uri(uri: str) -> tuple[str, str]:
+    bucket_key = uri[5:]
+    bucket, _, key = bucket_key.partition("/")
+    if not bucket:
+        raise ValueError(f"Missing bucket in S3 URI: {uri}")
+    return bucket, key.strip("/")
+
+
+def _load_s3_parquet(uri: str) -> pd.DataFrame:
+    import boto3
+
+    bucket, key = _parse_s3_uri(uri)
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION"))
+
+    if key.endswith(".parquet"):
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        return pd.read_parquet(io.BytesIO(obj["Body"].read()))
+
+    prefix = key.rstrip("/")
+    if prefix:
+        prefix = f"{prefix}/"
+    frames: list[pd.DataFrame] = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []):
+            object_key = item["Key"]
+            if not object_key.endswith(".parquet"):
+                continue
+            obj = s3.get_object(Bucket=bucket, Key=object_key)
+            frames.append(pd.read_parquet(io.BytesIO(obj["Body"].read())))
+    if not frames:
+        raise FileNotFoundError(f"No parquet files found under {uri}")
+    return pd.concat(frames, ignore_index=True)
+
+
+def _load_parquet_or_directory(path: str | Path) -> pd.DataFrame:
+    path_str = str(path)
+    if path_str.startswith("s3://"):
+        logger.info(f"Loading feature parquet from {path_str}")
+        return _load_s3_parquet(path_str)
+
+    local_path = Path(path)
+    if local_path.is_dir():
+        parquet_files = sorted(local_path.rglob("*.parquet"))
+        if parquet_files:
+            logger.info(f"Loading {len(parquet_files)} parquet files from {local_path}")
+            return pd.concat(
+                [pd.read_parquet(parquet_file) for parquet_file in parquet_files],
+                ignore_index=True,
+            )
+    return pd.read_parquet(local_path)
+
+
 def detect_devices() -> tuple[str, str]:
     """Return XGBoost and LightGBM device names following the notebook."""
     try:
@@ -79,7 +133,13 @@ def _load_feature_frame(
     class_limits: dict[str, int | None],
     allow_synthetic: bool,
 ) -> pd.DataFrame:
+    if data_dir.startswith("s3://"):
+        return _load_parquet_or_directory(data_dir)
+
     data_path = Path(data_dir)
+    if data_path.is_dir() and list(data_path.rglob("*.parquet")):
+        return _load_parquet_or_directory(data_path)
+
     parquet_candidates = [
         data_path if data_path.suffix == ".parquet" else None,
         data_path / "features.parquet",
@@ -88,7 +148,7 @@ def _load_feature_frame(
     for candidate in parquet_candidates:
         if candidate and candidate.exists():
             logger.info(f"Loading precomputed features from {candidate}")
-            return pd.read_parquet(candidate)
+            return _load_parquet_or_directory(candidate)
 
     logger.info(f"Extracting features from Balanced CAP CSVs in {data_path}")
     return load_balanced_cap_dataset(
@@ -102,9 +162,16 @@ def load_training_data(
     data_dir: str,
     class_limits: dict[str, int | None],
     allow_synthetic: bool = False,
+    extra_data: list[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, LabelEncoder, pd.DataFrame]:
     """Load or build a 24-feature disease-classification dataset."""
     df = _load_feature_frame(data_dir, class_limits, allow_synthetic)
+    for extra_path in extra_data or []:
+        if not extra_path:
+            continue
+        extra_df = _load_feature_frame(extra_path, class_limits, False)
+        logger.info(f"Appending extra training data from {extra_path}: {len(extra_df)} rows")
+        df = pd.concat([df, extra_df], ignore_index=True)
 
     label_col = "disease" if "disease" in df.columns else "label"
     if label_col not in df.columns:
@@ -204,6 +271,7 @@ def train_and_evaluate(
     for name, model in models.items():
         logger.info(f"Training {name}")
         with mlflow.start_run(run_name=name) as run:
+            logger.info(f"Run ID: {run.info.run_id}")
             fit_kwargs: dict[str, object] = {}
             if name in {"XGBoost", "LightGBM"}:
                 fit_kwargs["sample_weight"] = sample_weights
@@ -320,6 +388,40 @@ def export_artifacts(
     }
     Path("metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
+    best_run_id = str(results[best_name]["run_id"])
+    try:
+        with mlflow.start_run(run_id=best_run_id):
+            mlflow.log_artifacts(str(output_dir), artifact_path="serving_artifacts")
+            mlflow.log_artifact("metrics.json")
+    except Exception as exc:
+        logger.warning(f"Could not log serving artifacts to MLflow: {exc}")
+
+
+def upload_artifacts_to_s3(model_dir: str, artifact_s3_uri: str) -> list[str]:
+    """Upload serving artifacts to S3 so CI/CD and runtime sync can consume them."""
+    import boto3
+
+    bucket, prefix = _parse_s3_uri(artifact_s3_uri)
+    output_dir = Path(model_dir)
+    files = [
+        output_dir / "model.pkl",
+        output_dir / "model.ubj",
+        output_dir / "label_encoder.pkl",
+        output_dir / "feature_names.json",
+        output_dir / "metadata.json",
+        Path("metrics.json"),
+    ]
+    uploaded: list[str] = []
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION"))
+    for path in files:
+        if not path.exists():
+            continue
+        key = "/".join(part for part in [prefix, path.name] if part)
+        s3.upload_file(str(path), bucket, key)
+        uploaded.append(f"s3://{bucket}/{key}")
+    logger.info(f"Uploaded {len(uploaded)} artifacts to {artifact_s3_uri}")
+    return uploaded
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train sleep disorder classifier")
@@ -334,6 +436,17 @@ def main() -> None:
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--allow-synthetic", action="store_true")
     parser.add_argument("--retrain", action="store_true", help="Accepted by CI retrain jobs.")
+    parser.add_argument(
+        "--extra-data",
+        action="append",
+        default=[],
+        help="Additional feature parquet file/prefix to append to the training data.",
+    )
+    parser.add_argument(
+        "--artifact-s3-uri",
+        default=os.getenv("MODEL_ARTIFACT_S3_URI", ""),
+        help="Optional s3://bucket/prefix where exported serving artifacts are uploaded.",
+    )
     for label in DISEASE_FILES:
         parser.add_argument(
             f"--max-{label}",
@@ -353,6 +466,7 @@ def main() -> None:
         args.data_dir,
         class_limits=class_limits,
         allow_synthetic=args.allow_synthetic,
+        extra_data=args.extra_data,
     )
 
     stratify = y if np.bincount(y).min() >= 2 else None
@@ -380,6 +494,8 @@ def main() -> None:
         sample_weights,
     )
     export_artifacts(args.model_dir, best_name, results, label_encoder, device)
+    if args.artifact_s3_uri:
+        upload_artifacts_to_s3(args.model_dir, args.artifact_s3_uri)
 
     logger.info("Training complete.")
     logger.info(f"Artifacts written to {Path(args.model_dir).resolve()}")

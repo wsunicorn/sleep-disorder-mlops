@@ -150,6 +150,8 @@ def pipeline_page(request):
             "model_name": settings.MLFLOW_MODEL_NAME,
             "model_stage": settings.MLFLOW_MODEL_STAGE,
             "tracking_uri": settings.MLFLOW_TRACKING_URI,
+            "artifact_s3_uri": getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
+            "feature_store_s3_uri": getattr(settings, "MLOPS_FEATURE_STORE_S3_URI", ""),
             "monitoring_ready": (workflow_root / "monitoring.yml").exists(),
             "retrain_ready": (workflow_root / "retrain.yml").exists(),
             "ci_ready": (workflow_root / "ci.yml").exists(),

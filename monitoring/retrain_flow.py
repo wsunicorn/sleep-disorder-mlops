@@ -16,6 +16,9 @@ load_dotenv()
 S3_BUCKET = os.getenv("S3_BUCKET", "sleep-mlops-data")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MLFLOW_MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
+MODEL_ARTIFACT_S3_URI = os.getenv("MODEL_ARTIFACT_S3_URI", "")
+RETRAIN_TRAINING_DATA = os.getenv("RETRAIN_TRAINING_DATA", "data/raw/balanced_CAP")
+RETRAIN_EXTRA_DATA = os.getenv("RETRAIN_EXTRA_DATA", "")
 F1_PROMOTE_THRESHOLD = 0.80  # Model mới phải đạt F1 ≥ 0.80 để promote
 
 
@@ -59,18 +62,24 @@ def run_feature_engineering() -> str:
 
 
 @task(name="run-training", retries=1)
-def run_training(features_path: str) -> str:
+def run_training(training_data: str, extra_data: str = "") -> str:
     """Chạy training và trả về MLflow run_id."""
     pf_logger = get_run_logger()
-    pf_logger.info(f"Starting training with data: {features_path}")
+    pf_logger.info(f"Starting training with data: {training_data}")
+
+    command = [
+        "python", "training/train.py",
+        "--data-dir", training_data,
+        "--model-type", "all",
+        "--retrain",
+    ]
+    if extra_data:
+        command.extend(["--extra-data", extra_data])
+    if MODEL_ARTIFACT_S3_URI:
+        command.extend(["--artifact-s3-uri", MODEL_ARTIFACT_S3_URI])
 
     result = subprocess.run(
-        [
-            "python", "training/train.py",
-            "--data-dir", features_path,
-            "--model-type", "all",
-            "--retrain",
-        ],
+        command,
         capture_output=True,
         text=True,
         env={**os.environ, "MLFLOW_TRACKING_URI": MLFLOW_TRACKING_URI},
@@ -119,8 +128,10 @@ def retrain_pipeline(drift_share: float = 0.0, f1_current: float = 1.0):
         print("No retraining needed. Exiting.")
         return
 
-    features_path = run_feature_engineering()
-    run_id = run_training(features_path)
+    training_data = RETRAIN_TRAINING_DATA
+    if training_data == "data/features":
+        training_data = run_feature_engineering()
+    run_id = run_training(training_data, RETRAIN_EXTRA_DATA)
     promoted = evaluate_and_promote(run_id)
 
     if promoted:

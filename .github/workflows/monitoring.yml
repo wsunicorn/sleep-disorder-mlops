@@ -1,5 +1,9 @@
 name: Monitoring - Drift Check
 
+permissions:
+  contents: read
+  actions: write
+
 on:
   push:
     branches: [main]
@@ -23,6 +27,9 @@ env:
   AWS_REGION: ap-southeast-1
   MONITOR_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   MONITOR_AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  DRIFT_THRESHOLD: ${{ vars.DRIFT_THRESHOLD || '0.3' }}
+  RETRAIN_TRAINING_DATA: ${{ vars.RETRAIN_TRAINING_DATA || 's3://sleep-mlops-651709/features/reference/features.parquet' }}
+  MODEL_ARTIFACT_S3_URI: ${{ vars.MODEL_ARTIFACT_S3_URI || 's3://sleep-mlops-651709/models' }}
 
 jobs:
   drift-check:
@@ -87,14 +94,41 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Run drift detection
+        id: drift-run
         if: steps.drift-inputs.outputs.enabled == 'true'
-        continue-on-error: true
         shell: bash
         run: |
           python monitoring/drift_detection.py \
             --reference-data "${{ steps.drift-inputs.outputs.reference_data }}" \
             --current-data "${{ steps.drift-inputs.outputs.current_data }}" \
-            --output-report reports/
+            --output-report reports/ \
+            --threshold "$DRIFT_THRESHOLD"
+
+      - name: Read drift decision
+        id: drift-result
+        if: steps.drift-inputs.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          ALERT=$(python -c "import json; data=json.load(open('reports/drift_summary_latest.json', encoding='utf-8')); print(str(data.get('alert', False)).lower())")
+          SHARE=$(python -c "import json; data=json.load(open('reports/drift_summary_latest.json', encoding='utf-8')); print(data.get('drift_share', 0.0))")
+          echo "alert=$ALERT" >> "$GITHUB_OUTPUT"
+          echo "drift_share=$SHARE" >> "$GITHUB_OUTPUT"
+          echo "Drift alert: $ALERT (share=$SHARE)"
+
+      - name: Trigger retrain workflow
+        if: steps.drift-result.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh workflow run retrain.yml \
+            --ref main \
+            -f reason="Data drift detected by monitoring.yml (share=${{ steps.drift-result.outputs.drift_share }})" \
+            -f training_data="$RETRAIN_TRAINING_DATA" \
+            -f extra_data="${{ steps.drift-inputs.outputs.current_data }}" \
+            -f artifact_s3_uri="$MODEL_ARTIFACT_S3_URI" \
+            -f model_type="all" \
+            -f deploy_after_success="true"
 
       - name: Upload drift reports
         if: always() && steps.drift-inputs.outputs.enabled == 'true'

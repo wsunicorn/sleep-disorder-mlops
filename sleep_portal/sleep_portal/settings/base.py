@@ -136,10 +136,22 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
 MLFLOW_MODEL_STAGE = os.environ.get("MLFLOW_MODEL_STAGE", "Production")
+MODEL_ARTIFACT_S3_URI = os.environ.get("MODEL_ARTIFACT_S3_URI", "")
+MODEL_ARTIFACT_LOCAL_DIR = os.environ.get(
+    "MODEL_ARTIFACT_LOCAL_DIR",
+    str(BASE_DIR.parent / "models"),
+)
 
 # AWS
 AWS_S3_BUCKET = os.environ.get("S3_BUCKET", "sleep-mlops-data")
 AWS_DEFAULT_REGION = os.environ.get("AWS_DEFAULT_REGION", "ap-southeast-1")
+
+# MLOps feature store for ingested data batches.
+MLOPS_FEATURE_STORE_LOCAL_DIR = os.environ.get(
+    "MLOPS_FEATURE_STORE_LOCAL_DIR",
+    str(BASE_DIR.parent / "data" / "monitoring" / "current"),
+)
+MLOPS_FEATURE_STORE_S3_URI = os.environ.get("MLOPS_FEATURE_STORE_S3_URI", "")
 
 # Security headers (production)
 if not DEBUG:

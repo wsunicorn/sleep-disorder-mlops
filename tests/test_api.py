@@ -5,6 +5,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 
 
 PREDICT_URL = "/api/v1/predict/"
@@ -184,6 +185,45 @@ class TestPredictEDFEndpoint:
             response = view(request)
 
         assert response.status_code == 413
+
+
+# ── Ingest endpoint / MLOps feature store ────────────────────────────────────
+
+@pytest.mark.django_db
+class TestIngestEndpoint:
+    def test_ingest_persists_feature_batch(self, django_client, tmp_path):
+        payload = {
+            "patient_id": "PT-MLOPS-001",
+            "disorder": "insomnia",
+            "age": 42,
+            "gender": "F",
+            "epochs": [
+                {
+                    "epoch_index": 0,
+                    "predicted_class": "insomnia",
+                    "confidence": 0.8,
+                    "timestamp": "2026-05-22T00:00:00Z",
+                    "features": [float(i) for i in range(24)],
+                    "label": "insomnia",
+                }
+            ],
+        }
+
+        with override_settings(
+            MLOPS_FEATURE_STORE_LOCAL_DIR=str(tmp_path),
+            MLOPS_FEATURE_STORE_S3_URI="",
+        ):
+            response = django_client.post(
+                "/api/v1/ingest/",
+                data=json.dumps(payload),
+                content_type="application/json",
+            )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["epochs_saved"] == 1
+        assert data["feature_rows_saved"] == 1
+        assert list(tmp_path.rglob("*.parquet"))
 
 
 # ── Dashboard pages ───────────────────────────────────────────────────────────

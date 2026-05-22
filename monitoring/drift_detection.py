@@ -5,6 +5,7 @@ So sánh phân phối features mới với baseline, phát hiện data drift.
 
 import os
 import argparse
+import io
 import json
 import pandas as pd
 import boto3
@@ -23,18 +24,68 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-1")
 DRIFT_THRESHOLD = 0.3  # Tỉ lệ features drift > 30% → cảnh báo
 
 
-def load_parquet_from_s3_or_local(path: str) -> pd.DataFrame:
-    """Load parquet từ S3 URI hoặc local path."""
-    if path.startswith("s3://"):
-        import io
-        s3 = boto3.client("s3", region_name=AWS_REGION)
-        bucket, key = path[5:].split("/", 1)
+def _parse_s3_uri(uri: str) -> tuple[str, str]:
+    bucket_key = uri[5:]
+    bucket, _, key = bucket_key.partition("/")
+    if not bucket:
+        raise ValueError(f"Missing bucket in S3 URI: {uri}")
+    return bucket, key
+
+
+def _read_parquet_files(paths: list[Path]) -> pd.DataFrame:
+    if not paths:
+        raise FileNotFoundError("No parquet files found")
+    frames = [pd.read_parquet(path) for path in paths]
+    return pd.concat(frames, ignore_index=True)
+
+
+def _load_local_parquet(path: str) -> pd.DataFrame:
+    local_path = Path(path)
+    if local_path.is_dir():
+        files = sorted(local_path.rglob("*.parquet"))
+        return _read_parquet_files(files)
+    return pd.read_parquet(local_path)
+
+
+def _load_s3_parquet(uri: str) -> pd.DataFrame:
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    bucket, key = _parse_s3_uri(uri)
+
+    if key.endswith(".parquet"):
         obj = s3.get_object(Bucket=bucket, Key=key)
         return pd.read_parquet(io.BytesIO(obj["Body"].read()))
-    return pd.read_parquet(path)
+
+    prefix = key.rstrip("/")
+    if prefix:
+        prefix = f"{prefix}/"
+    paginator = s3.get_paginator("list_objects_v2")
+    frames = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []):
+            object_key = item["Key"]
+            if not object_key.endswith(".parquet"):
+                continue
+            obj = s3.get_object(Bucket=bucket, Key=object_key)
+            frames.append(pd.read_parquet(io.BytesIO(obj["Body"].read())))
+
+    if not frames:
+        raise FileNotFoundError(f"No parquet files found under {uri}")
+    return pd.concat(frames, ignore_index=True)
 
 
-def run_drift_detection(reference_path: str, current_path: str, output_dir: str) -> dict:
+def load_parquet_from_s3_or_local(path: str) -> pd.DataFrame:
+    """Load parquet từ S3 URI, S3 prefix, file local hoặc thư mục local."""
+    if path.startswith("s3://"):
+        return _load_s3_parquet(path)
+    return _load_local_parquet(path)
+
+
+def run_drift_detection(
+    reference_path: str,
+    current_path: str,
+    output_dir: str,
+    threshold: float = DRIFT_THRESHOLD,
+) -> dict:
     """
     Chạy Evidently drift detection.
     Returns dict với thông tin drift.
@@ -46,7 +97,18 @@ def run_drift_detection(reference_path: str, current_path: str, output_dir: str)
     current_df = load_parquet_from_s3_or_local(current_path)
 
     # Chỉ lấy feature columns (bỏ metadata)
-    meta_cols = ["epoch_index", "subject_id", "label"]
+    meta_cols = [
+        "epoch_index",
+        "subject_id",
+        "patient_id",
+        "timestamp",
+        "label",
+        "disease",
+        "diagnosis",
+        "predicted_class",
+        "confidence",
+        "ingested_at",
+    ]
     reference_feature_cols = [c for c in reference_df.columns if c not in meta_cols]
     current_feature_cols = [c for c in current_df.columns if c not in meta_cols]
     feature_cols = [c for c in reference_feature_cols if c in current_feature_cols]
@@ -86,17 +148,20 @@ def run_drift_detection(reference_path: str, current_path: str, output_dir: str)
     logger.info(f"Share of drifted features: {drift_share:.2%}")
 
     summary = {
-        "drift_detected": drift_detected,
-        "drift_share": drift_share,
+        "drift_detected": bool(drift_detected),
+        "drift_share": float(drift_share),
         "report_path": str(report_path),
         "n_reference": len(ref_features),
         "n_current": len(cur_features),
         "n_features": len(feature_cols),
-        "alert": drift_share > DRIFT_THRESHOLD,
+        "threshold": float(threshold),
+        "alert": bool(drift_share > threshold),
     }
 
     summary_path = output_dir / f"drift_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    latest_summary_path = output_dir / "drift_summary_latest.json"
+    latest_summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     logger.info(f"Summary saved: {summary_path}")
 
     return summary
@@ -107,18 +172,20 @@ def main():
     parser.add_argument("--reference-data", required=True, help="Path to reference parquet")
     parser.add_argument("--current-data", required=True, help="Path to current parquet")
     parser.add_argument("--output-report", default="reports/", help="Output directory")
+    parser.add_argument("--threshold", type=float, default=DRIFT_THRESHOLD)
     args = parser.parse_args()
 
     result = run_drift_detection(
         args.reference_data,
         args.current_data,
         args.output_report,
+        threshold=args.threshold,
     )
 
     if result["alert"]:
         logger.warning(
             f"ALERT: Data drift exceeds threshold! "
-            f"Drift share = {result['drift_share']:.2%} > {DRIFT_THRESHOLD:.2%}"
+            f"Drift share = {result['drift_share']:.2%} > {result['threshold']:.2%}"
         )
 
     return result

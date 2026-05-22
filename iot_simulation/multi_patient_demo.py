@@ -20,7 +20,7 @@ from feature_engineering.cap_features import (
     sample_feature_vector,
 )
 
-DEFAULT_URL = "http://sleep-portal-alb-1369421469.ap-southeast-1.elb.amazonaws.com"
+DEFAULT_URL = "http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com"
 DEFAULT_STATS_PATH = Path("data/raw/balanced_CAP/feature_stats.json")
 
 DEFAULT_PATIENTS = [
@@ -102,6 +102,7 @@ def run_patient(
                 start_index = epoch_index - len(feature_buffer) + 1
                 for offset, pred in enumerate(batch_predictions):
                     current_epoch = start_index + offset
+                    feature_vector = feature_buffer[offset]
                     predictions.append(pred)
                     epoch_records.append(
                         {
@@ -109,6 +110,8 @@ def run_patient(
                             "predicted_class": pred,
                             "confidence": None,
                             "timestamp": timestamp.isoformat(),
+                            "features": [float(value) for value in feature_vector],
+                            "label": disorder,
                         }
                     )
                     logger.info(f"[{patient_id}] epoch {current_epoch + 1:03d} -> {pred}")

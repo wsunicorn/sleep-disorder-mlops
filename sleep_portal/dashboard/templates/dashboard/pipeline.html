@@ -46,6 +46,20 @@
         <p>Backend lưu trữ MLflow.</p>
       </div>
     </div>
+    <div class="col-md-6">
+      <div class="ops-card">
+        <span class="ops-label">Model artifact S3</span>
+        <strong style="word-break:break-all;font-size:0.82rem">{{ artifact_s3_uri|default:"Chưa cấu hình" }}</strong>
+        <p>Nơi CI/CD và ứng dụng lấy model mới sau retrain.</p>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="ops-card">
+        <span class="ops-label">Feature store hiện tại</span>
+        <strong style="word-break:break-all;font-size:0.82rem">{{ feature_store_s3_uri|default:"Chưa cấu hình" }}</strong>
+        <p>Dữ liệu mới được ingest để monitoring và retrain sử dụng.</p>
+      </div>
+    </div>
   </div>
 </section>
 

@@ -14,11 +14,42 @@ from django.conf import settings
 from django.core.cache import cache
 from loguru import logger
 
+from .artifact_sync import sync_model_artifacts_once
+
 
 _model = None
 _feature_names = None
 _label_encoder = None
 _using_pkl_fallback = False
+_artifact_sync_status = None
+
+
+def _model_dirs() -> list[Path]:
+    configured = Path(getattr(settings, "MODEL_ARTIFACT_LOCAL_DIR", "models"))
+    return [
+        configured,
+        Path(settings.BASE_DIR).parent / "models",
+        Path(settings.BASE_DIR) / "models",
+        Path("/app/models"),
+    ]
+
+
+def _sync_artifacts_if_configured() -> dict:
+    """Download latest S3 model artifacts once per process when configured."""
+    global _artifact_sync_status
+    if _artifact_sync_status is not None:
+        return _artifact_sync_status
+
+    _artifact_sync_status = sync_model_artifacts_once(
+        artifact_uri=getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
+        local_dir=getattr(settings, "MODEL_ARTIFACT_LOCAL_DIR", "models"),
+        aws_region=getattr(settings, "AWS_DEFAULT_REGION", None),
+    )
+    if _artifact_sync_status.get("downloaded"):
+        logger.info(f"Synced model artifacts: {_artifact_sync_status['downloaded']}")
+    elif _artifact_sync_status.get("error"):
+        logger.warning(f"Model artifact sync skipped/failed: {_artifact_sync_status['error']}")
+    return _artifact_sync_status
 
 
 class _MetadataLabelEncoder:
@@ -50,11 +81,8 @@ def _load_label_encoder():
     global _label_encoder
     if _label_encoder is not None:
         return _label_encoder
-    candidates = [
-        Path(settings.BASE_DIR).parent / "models" / "label_encoder.pkl",
-        Path(settings.BASE_DIR) / "models" / "label_encoder.pkl",
-        Path("/app/models/label_encoder.pkl"),
-    ]
+    _sync_artifacts_if_configured()
+    candidates = [path / "label_encoder.pkl" for path in _model_dirs()]
     for path in candidates:
         if path.exists():
             try:
@@ -66,11 +94,7 @@ def _load_label_encoder():
             except Exception as exc:
                 logger.warning(f"Could not load label encoder from {path}: {exc}")
 
-    metadata_candidates = [
-        Path(settings.BASE_DIR).parent / "models" / "metadata.json",
-        Path(settings.BASE_DIR) / "models" / "metadata.json",
-        Path("/app/models/metadata.json"),
-    ]
+    metadata_candidates = [path / "metadata.json" for path in _model_dirs()]
     for path in metadata_candidates:
         if path.exists():
             try:
@@ -90,11 +114,8 @@ def _load_feature_names() -> list | None:
     global _feature_names
     if _feature_names is not None:
         return _feature_names
-    candidates = [
-        Path(settings.BASE_DIR).parent / "models" / "feature_names.json",
-        Path(settings.BASE_DIR) / "models" / "feature_names.json",
-        Path("/app/models/feature_names.json"),
-    ]
+    _sync_artifacts_if_configured()
+    candidates = [path / "feature_names.json" for path in _model_dirs()]
     for path in candidates:
         if path.exists():
             _feature_names = json.loads(path.read_text())
@@ -114,6 +135,7 @@ def _get_model():
     global _model, _label_encoder, _using_pkl_fallback
     if _model is not None:
         return _model
+    _sync_artifacts_if_configured()
 
     # Try MLflow model registry first.
     try:
@@ -129,11 +151,7 @@ def _get_model():
         logger.warning(f"MLflow registry load failed ({mlflow_exc}); trying pkl fallback.")
 
     # Fallback: load model.pkl directly.
-    candidates = [
-        Path(settings.BASE_DIR).parent / "models" / "model.pkl",
-        Path(settings.BASE_DIR) / "models" / "model.pkl",
-        Path("/app/models/model.pkl"),
-    ]
+    candidates = [path / "model.pkl" for path in _model_dirs()]
     for pkl_path in candidates:
         if pkl_path.exists():
             logger.info(f"Loading model from pkl: {pkl_path}")
@@ -153,6 +171,8 @@ def get_model_status() -> dict:
         "model_name": settings.MLFLOW_MODEL_NAME,
         "model_stage": settings.MLFLOW_MODEL_STAGE,
         "tracking_uri": settings.MLFLOW_TRACKING_URI,
+        "artifact_s3_uri": getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
+        "artifact_sync": _sync_artifacts_if_configured(),
         "feature_count": get_feature_count(),
         "feature_names": _load_feature_names(),
         "supports_batch": True,
