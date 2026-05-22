@@ -2,6 +2,14 @@
 
 README này đóng vai trò như tài liệu tổng hợp cho project: vừa là báo cáo phân tích - thiết kế, vừa là hướng dẫn đọc hiểu hệ thống, chạy thử, test và deploy. Project hiện đã được chỉnh lại theo notebook chuẩn `notebooks/kaggle_cap_training.ipynb`, trong đó dữ liệu chính là Balanced CAP/CAP Sleep, tín hiệu đầu vào là EEG, nhãn đầu ra gồm 7 nhóm: `healthy`, `insomnia`, `narcolepsy`, `nfle`, `plm`, `rbd`, `sdb` [1], [2].
 
+## Thông tin đề tài
+
+- Tên đề tài: Phân tích dữ liệu cảm biến giấc ngủ để phát hiện rối loạn.
+- Giảng viên hướng dẫn: TS. Bùi Thanh Hùng.
+- Sinh viên tham gia: Nguyễn Ngọc Lân, Đoàn Vũ Thiên Ban.
+- Notebook làm chuẩn dữ liệu và mô hình: `notebooks/kaggle_cap_training.ipynb`.
+- Hướng triển khai: ứng dụng web kết hợp pipeline MLOps, phục vụ demo học thuật và báo cáo môn học.
+
 > Lưu ý: hệ thống là prototype học thuật/MLOps, không phải thiết bị chẩn đoán y khoa. Kết quả dự đoán chỉ nên dùng để minh họa quy trình phân tích tín hiệu, huấn luyện mô hình và triển khai ứng dụng.
 
 ## Trạng thái hiện tại
@@ -19,6 +27,37 @@ README này đóng vai trò như tài liệu tổng hợp cho project: vừa là
 - URL web app hiện tại: `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com`.
 - MLflow production: `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`.
 - Model Registry stage phục vụ: `Production`, có fallback tải artifact từ S3 khi registry tạm thời không sẵn sàng.
+
+## Ý nghĩa và định hướng xây dựng
+
+Project này không chỉ nhằm huấn luyện một mô hình phân loại trong notebook. Mục tiêu chính là biến quy trình phân tích dữ liệu EEG giấc ngủ thành một hệ thống có thể vận hành: có nơi nhận dữ liệu mới, có API dự đoán, có dashboard quan sát, có lưu lịch sử bệnh nhân, có theo dõi drift, có tái huấn luyện và có triển khai tự động lên AWS.
+
+Ý nghĩa của hệ thống:
+
+- Về học máy: chuẩn hóa luồng từ dữ liệu CAP Sleep đến đặc trưng EEG, mô hình phân loại và artifact phục vụ dự đoán.
+- Về phần mềm: đóng gói mô hình thành REST API và dashboard để người dùng có thể tương tác thay vì chỉ xem notebook.
+- Về MLOps: theo dõi vòng đời model từ train, log MLflow, promote Production, deploy ECS đến monitoring dữ liệu mới.
+- Về báo cáo/đồ án: thể hiện được cả phân tích thiết kế, hiện thực ứng dụng, kiểm thử, triển khai và hướng phát triển.
+
+## Lý do chọn các thành phần chính
+
+| Thành phần                      | Lý do chọn                                                                                           | Vai trò trong project                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| CAP Sleep / Balanced CAP          | Là nguồn dữ liệu giấc ngủ công khai, có tín hiệu EEG và nhóm bệnh liên quan [1]          | Dữ liệu nền cho huấn luyện và đánh giá       |
+| EEG                               | EEG phản ánh hoạt động điện não trong các giai đoạn ngủ và rối loạn giấc ngủ [3], [4] | Tín hiệu chính để trích xuất đặc trưng      |
+| Epoch 2 giây                     | Bám theo notebook chuẩn, giúp tăng số mẫu và giữ cửa sổ ngắn cho feature                    | Đơn vị phân tích của mô hình                  |
+| 24 đặc trưng EEG               | Gọn, dễ giải thích, gồm năng lượng băng tần, tỉ lệ năng lượng, entropy và thống kê   | Input thống nhất cho training, API và monitoring   |
+| XGBoost / LightGBM / RandomForest | Nhẹ hơn deep learning, phù hợp dữ liệu tabular feature, dễ train trong CI [14], [15], [16]      | Các ứng viên mô hình để chọn theo weighted F1 |
+| Weighted F1                       | Dữ liệu nhiều lớp có thể lệch phân bố, accuracy đơn thuần dễ gây hiểu nhầm             | Metric chính để chọn/promote model                |
+| Django REST Framework             | Nhanh để xây API, tích hợp tốt với Django dashboard và ORM [20]                                | API dự đoán, ingest, health, model-info            |
+| PostgreSQL / RDS                  | CSDL quan hệ ổn định, phù hợp lưu bệnh nhân và lịch sử epoch                               | Lưu metadata và prediction history                  |
+| S3 + Parquet                      | Lưu artifact và feature batch bền vững, đọc được từ GitHub Actions/AWS [29]                  | Feature store, artifact store, dữ liệu monitoring   |
+| MLflow                            | Theo dõi experiment, metric, artifact và Model Registry [17]                                         | Quản lý vòng đời model Production                |
+| Evidently AI                      | Công cụ phổ biến để phát hiện drift dữ liệu tabular [30]                                     | So sánh reference/current features                   |
+| GitHub Actions                    | Dễ tích hợp repo, tự động test/build/deploy/retrain [25]                                         | CI/CD và orchestration workflow                      |
+| Docker + ECR + ECS Fargate        | Đóng gói ứng dụng nhất quán, deploy serverless container trên AWS [24], [27]                   | Môi trường chạy production                        |
+| ALB                               | Cung cấp public endpoint và health check cho ECS [28]                                                | Cửa vào web app/API                                 |
+| CloudWatch                        | Dịch vụ log/metric mặc định của ECS/AWS [35]                                                     | Quan sát runtime và lỗi production                 |
 
 Xác minh production gần nhất ngày 22/05/2026:
 
@@ -38,7 +77,6 @@ Xác minh production gần nhất ngày 22/05/2026:
 - [CHƯƠNG 3. KẾT LUẬN](#chương-3-kết-luận)
 - [Hướng dẫn chạy và vận hành](#hướng-dẫn-chạy-và-vận-hành)
 - [Kịch bản demo toàn bộ project](#kịch-bản-demo-toàn-bộ-project)
-- [Prompt tạo sơ đồ bằng ChatGPT Image](#prompt-tạo-sơ-đồ-bằng-chatgpt-image)
 - [Tài liệu tham khảo](#tài-liệu-tham-khảo)
 
 ---
@@ -74,49 +112,29 @@ Output chính:
 
 Các lớp phân loại:
 
-| Label | Ý nghĩa |
-|---|---|
-| `healthy` | Không có bệnh lý trong dữ liệu CAP |
-| `insomnia` | Mất ngủ |
-| `narcolepsy` | Ngủ rũ |
-| `nfle` | Nocturnal Frontal Lobe Epilepsy - động kinh thùy trán về đêm |
-| `plm` | Periodic Leg Movement - cử động chân chu kỳ |
-| `rbd` | REM Behavior Disorder - rối loạn hành vi giấc ngủ REM |
-| `sdb` | Sleep Disordered Breathing - rối loạn hô hấp khi ngủ |
+| Label          | Ý nghĩa                                                           |
+| -------------- | ------------------------------------------------------------------- |
+| `healthy`    | Không có bệnh lý trong dữ liệu CAP                            |
+| `insomnia`   | Mất ngủ                                                           |
+| `narcolepsy` | Ngủ rũ                                                            |
+| `nfle`       | Nocturnal Frontal Lobe Epilepsy - động kinh thùy trán về đêm |
+| `plm`        | Periodic Leg Movement - cử động chân chu kỳ                    |
+| `rbd`        | REM Behavior Disorder - rối loạn hành vi giấc ngủ REM          |
+| `sdb`        | Sleep Disordered Breathing - rối loạn hô hấp khi ngủ           |
+
+Sơ đồ kiến trúc production MLOps hiện tại của project:
+
+![Sleep Disorder Detection - Production MLOps Architecture](docs/images/architecture_diagram.png)
+
+Phiên bản sơ đồ kiến trúc tổng thể dùng cho báo cáo:
+
+![Sơ đồ kiến trúc MLOps tổng thể](docs/images/general_architecture.png)
 
 ## 1.2. Sơ đồ chức năng tổng quát
 
 Hệ thống được chia thành 6 nhóm chức năng chính:
 
-```mermaid
-flowchart TD
-    A[Quản lý dữ liệu giấc ngủ] --> A1[Đọc EDF / CSV]
-    A --> A2[Tiền xử lý EEG]
-    A --> A3[Trích xuất 24 đặc trưng]
-
-    B[Huấn luyện mô hình] --> B1[Chia train/validation]
-    B --> B2[Train XGBoost / LightGBM / RandomForest]
-    B --> B3[Chọn mô hình tốt nhất]
-    B --> B4[Lưu artifact và metadata]
-
-    C[Phục vụ dự đoán] --> C1[Predict bằng feature]
-    C --> C2[Predict bằng file EDF]
-    C --> C3[Model info / health check]
-
-    D[Dashboard] --> D1[Tổng quan hệ thống]
-    D --> D2[Danh sách bệnh nhân]
-    D --> D3[Chi tiết dự đoán theo epoch]
-    D --> D4[Trang pipeline MLOps]
-
-    E[Mô phỏng IoT] --> E1[Sinh/sampling tín hiệu]
-    E --> E2[Gọi API predict]
-    E --> E3[Gửi kết quả vào ingest]
-
-    F[MLOps và Cloud] --> F1[CI/CD GitHub Actions]
-    F --> F2[Docker/ECR/ECS/ALB]
-    F --> F3[Monitoring drift]
-    F --> F4[Retrain thủ công/tự động]
-```
+![Sơ đồ chức năng tổng quát](docs/images/functional_decomposition_diagram.png)
 
 Ý nghĩa:
 
@@ -128,6 +146,8 @@ flowchart TD
 - Nhóm F đảm bảo hệ thống có thể deploy, kiểm thử, theo dõi và nâng cấp liên tục.
 
 ## 1.3. Biểu đồ trường hợp sử dụng Usercase
+
+![Biểu đồ Use Case](docs/images/usecase_diagram.png)
 
 ```mermaid
 flowchart LR
@@ -170,6 +190,8 @@ Các tác nhân chính:
 - AWS: cung cấp hạ tầng chạy web app và lưu artifact.
 
 ## 1.4. Biểu đồ hoạt động
+
+![Biểu đồ hoạt động](docs/images/Activity_Diagram.png)
 
 ### 1.4.1. Hoạt động huấn luyện mô hình
 
@@ -226,35 +248,40 @@ flowchart TD
 
 ## 1.5. Biểu đồ trình tự
 
+![Biểu đồ trình tự](docs/images/Sequence_Diagram.png)
+
 ### 1.5.1. Trình tự dự đoán bằng feature
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor User as Người dùng
     participant UI as Dashboard / Client
     participant API as Django REST API
     participant S as Serializer
     participant P as Predictor
-    participant M as Model artifact
-    participant C as Redis cache
+    participant M as Model Artifact
+    participant C as Redis Cache
 
-    User->>UI: Nhập batch 24 đặc trưng
+    User->>UI: Nhập batch gồm 24 đặc trưng EEG
     UI->>API: POST /api/v1/predict/
-    API->>S: Validate shape và kiểu dữ liệu
+    API->>S: Kiểm tra shape và kiểu dữ liệu
     S-->>API: Dữ liệu hợp lệ
+
     API->>P: predict(features)
-    P->>C: Kiểm tra cache theo hash feature
+    P->>C: Kiểm tra cache bằng hash(features)
+
     alt Có cache
         C-->>P: Trả kết quả đã lưu
     else Không có cache
-        P->>M: Load model.pkl / MLflow model
-        M-->>P: Model + label encoder + feature names
+        P->>M: Tải model.pkl hoặc MLflow model
+        M-->>P: Model, label encoder, feature names
         P->>P: Dự đoán và giải mã nhãn
-        P->>C: Lưu cache 1 giờ
+        P->>C: Lưu kết quả cache trong 1 giờ
     end
+
     P-->>API: predicted_class, predictions, class_counts
     API-->>UI: JSON response
-    UI-->>User: Hiển thị kết quả
+    UI-->>User: Hiển thị kết quả dự đoán
 ```
 
 ### 1.5.2. Trình tự IoT ingest
@@ -277,6 +304,8 @@ sequenceDiagram
 ```
 
 ## 1.6. Biểu đồ lớp (Class diagram)
+
+![Biểu đồ lớp](docs/images/Class_Diagram.png)
 
 ```mermaid
 classDiagram
@@ -351,6 +380,8 @@ classDiagram
 
 ## 1.7. Biểu đồ luồng dữ liệu Database diagram
 
+![Biểu đồ luồng dữ liệu](docs/images/Data_Flow_Diagram.png)
+
 ```mermaid
 flowchart TD
     A[EDF / CSV Balanced CAP] --> B[feature_engineering]
@@ -382,6 +413,8 @@ Luồng dữ liệu được chia làm hai nhánh:
 - Nhánh online: API nhận feature/EDF -> model dự đoán -> lưu kết quả -> dashboard hiển thị.
 
 ## 1.8. Biểu đồ mối quan hệ giữa các dữ liệu
+
+![Biểu đồ mối quan hệ giữa các dữ liệu](docs/images/data_relationship_diagram.png)
 
 ```mermaid
 erDiagram
@@ -416,15 +449,17 @@ Quy tắc dữ liệu quan trọng:
 
 ## 1.9. Thiết kế giao diện
 
+![Thiết kế giao diện chính](docs/images/UI_wireframe.png)
+
 Giao diện nằm trong `sleep_portal/dashboard/templates/dashboard/`, sử dụng Django Template, Bootstrap và Chart.js. Các màn hình chính:
 
-| Giao diện | File | Mục đích |
-|---|---|---|
-| Tổng quan | `home.html` | Hiển thị KPI: số bệnh nhân, số epoch dự đoán, phân bố chẩn đoán, hoạt động gần đây |
-| Danh sách bệnh nhân | `patient_list.html` | Lọc/xem các bệnh nhân đã ingest |
-| Chi tiết bệnh nhân | `patient_detail.html` | Xem timeline dự đoán theo epoch và thống kê từng bệnh nhân |
-| Dự đoán | `predict.html` | Cho phép nhập feature, dùng sample JSON, hoặc upload EDF |
-| Quy trình | `pipeline.html` | Tóm tắt model registry, CI/CD, monitoring, retrain và kiến trúc |
+| Giao diện             | File                    | Mục đích                                                                                            |
+| ---------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| Tổng quan             | `home.html`           | Hiển thị KPI: số bệnh nhân, số epoch dự đoán, phân bố chẩn đoán, hoạt động gần đây |
+| Danh sách bệnh nhân | `patient_list.html`   | Lọc/xem các bệnh nhân đã ingest                                                                  |
+| Chi tiết bệnh nhân  | `patient_detail.html` | Xem timeline dự đoán theo epoch và thống kê từng bệnh nhân                                    |
+| Dự đoán             | `predict.html`        | Cho phép nhập feature, dùng sample JSON, hoặc upload EDF                                           |
+| Quy trình             | `pipeline.html`       | Tóm tắt model registry, CI/CD, monitoring, retrain và kiến trúc                                   |
 
 Nguyên tắc thiết kế:
 
@@ -434,6 +469,8 @@ Nguyên tắc thiết kế:
 - Trang bệnh nhân phục vụ luồng IoT: sau khi simulator ingest, dữ liệu xuất hiện trên dashboard.
 
 ## 1.10. Thiết kế giải thuật
+
+![Sơ đồ giải thuật học máy](docs/images/machine_learning_algorithm_flowchart.png)
 
 ### 1.10.1. Tổng quan mô hình đề xuất
 
@@ -478,16 +515,16 @@ Việc chia cửa sổ ngắn giúp biến bản ghi dài thành nhiều mẫu h
 
 Danh sách feature được cố định trong `models/feature_names.json` và `feature_engineering/cap_features.py`:
 
-| Nhóm | Feature |
-|---|---|
-| Công suất phổ | `delta_power`, `theta_power`, `alpha_power`, `beta_power`, `gamma_power` |
-| Tỷ lệ công suất | `delta_rel`, `theta_rel`, `alpha_rel`, `beta_rel`, `gamma_rel` |
-| Đặc trưng tần số | `spectral_entropy`, `peak_frequency`, `mean_frequency` |
-| Đặc trưng biên độ | `amplitude_mean`, `amplitude_std`, `rms` |
-| Tỷ số phổ | `delta_beta_ratio`, `theta_alpha_ratio` |
-| Thống kê phân phối | `skewness`, `kurtosis` |
-| Tín hiệu thời gian | `zero_crossing_rate` |
-| Hjorth | `hjorth_activity`, `hjorth_mobility`, `hjorth_complexity` |
+| Nhóm                   | Feature                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| Công suất phổ        | `delta_power`, `theta_power`, `alpha_power`, `beta_power`, `gamma_power` |
+| Tỷ lệ công suất     | `delta_rel`, `theta_rel`, `alpha_rel`, `beta_rel`, `gamma_rel`           |
+| Đặc trưng tần số   | `spectral_entropy`, `peak_frequency`, `mean_frequency`                       |
+| Đặc trưng biên độ | `amplitude_mean`, `amplitude_std`, `rms`                                     |
+| Tỷ số phổ            | `delta_beta_ratio`, `theta_alpha_ratio`                                        |
+| Thống kê phân phối  | `skewness`, `kurtosis`                                                         |
+| Tín hiệu thời gian   | `zero_crossing_rate`                                                             |
+| Hjorth                  | `hjorth_activity`, `hjorth_mobility`, `hjorth_complexity`                    |
 
 Bandpower được tính từ ước lượng mật độ phổ công suất. Project dùng cách tiếp cận kiểu Welch để ước lượng phổ, phù hợp cho tín hiệu hữu hạn và có nhiễu [8], [9]. Với mỗi dải tần:
 
@@ -524,11 +561,11 @@ Pipeline trong `training/train.py`:
 
 Kết quả hiện tại trong `models/metadata.json`:
 
-| Model | Weighted F1 | Accuracy |
-|---|---:|---:|
-| XGBoost | 0.5840 | 0.5814 |
-| LightGBM | 0.5929 | 0.5908 |
-| RandomForest | 0.5841 | 0.5855 |
+| Model        | Weighted F1 | Accuracy |
+| ------------ | ----------: | -------: |
+| XGBoost      |      0.5840 |   0.5814 |
+| LightGBM     |      0.5929 |   0.5908 |
+| RandomForest |      0.5841 |   0.5855 |
 
 LightGBM được chọn vì đạt metric tốt nhất trong 3 mô hình đang so sánh. Tuy nhiên, metric khoảng 0.59 cho thấy mô hình mới đủ mức demo, chưa đủ để xem là mô hình y tế đáng tin cậy.
 
@@ -536,28 +573,30 @@ LightGBM được chọn vì đạt metric tốt nhất trong 3 mô hình đang 
 
 Các artifact cần thiết:
 
-| Artifact | Vai trò |
-|---|---|
-| `models/model.pkl` | Model phục vụ inference |
-| `models/model.ubj` | Model XGBoost dạng UBJ nếu có |
-| `models/label_encoder.pkl` | Giải mã số lớp thành tên lớp |
-| `models/feature_names.json` | Khóa schema 24 feature |
-| `models/metadata.json` | Metadata model: class, metric, sampling rate, window |
-| `metrics.json` | Metric phục vụ DVC/GitHub |
+| Artifact                      | Vai trò                                             |
+| ----------------------------- | ---------------------------------------------------- |
+| `models/model.pkl`          | Model phục vụ inference                            |
+| `models/model.ubj`          | Model XGBoost dạng UBJ nếu có                     |
+| `models/label_encoder.pkl`  | Giải mã số lớp thành tên lớp                  |
+| `models/feature_names.json` | Khóa schema 24 feature                              |
+| `models/metadata.json`      | Metadata model: class, metric, sampling rate, window |
+| `metrics.json`              | Metric phục vụ DVC/GitHub                          |
 
 Schema feature được lưu riêng để API không bị lệch thứ tự cột. Đây là điểm quan trọng vì mô hình cây phụ thuộc vào đúng thứ tự/ý nghĩa feature.
 
 ## 1.11. Thiết kế cách tiến hành Test
 
+![Sơ đồ thiết kế kiểm thử](docs/images/testing_strategy_diagram.png)
+
 Chiến lược test gồm 5 lớp:
 
-| Lớp test | Mục tiêu | Nơi thực hiện |
-|---|---|---|
-| Unit test feature | Đảm bảo `extract_features` trả đúng 24 feature, không NaN/Inf | `tests/test_features.py` |
-| Unit test inference | Đảm bảo predictor load model/metadata và trả đúng cấu trúc | `tests/test_inference.py` |
-| API test | Test `/predict/`, `/health/`, `/model-info/` | `tests/test_api.py` |
-| CI test | Chạy pytest với Postgres và Redis service | `.github/workflows/ci.yml` |
-| Smoke test production | Sau deploy gọi `/api/v1/health/` và `/api/v1/model-info/` | GitHub Actions deploy job |
+| Lớp test             | Mục tiêu                                                             | Nơi thực hiện             |
+| --------------------- | ---------------------------------------------------------------------- | ---------------------------- |
+| Unit test feature     | Đảm bảo `extract_features` trả đúng 24 feature, không NaN/Inf | `tests/test_features.py`   |
+| Unit test inference   | Đảm bảo predictor load model/metadata và trả đúng cấu trúc    | `tests/test_inference.py`  |
+| API test              | Test `/predict/`, `/health/`, `/model-info/`                     | `tests/test_api.py`        |
+| CI test               | Chạy pytest với Postgres và Redis service                           | `.github/workflows/ci.yml` |
+| Smoke test production | Sau deploy gọi `/api/v1/health/` và `/api/v1/model-info/`        | GitHub Actions deploy job    |
 
 Các lệnh kiểm tra local:
 
@@ -584,16 +623,16 @@ Các tiêu chí pass tối thiểu:
 
 ## 2.1. Công nghệ sử dụng
 
-| Nhóm | Công nghệ |
-|---|---|
-| Frontend | Django Template, Bootstrap 5, Chart.js |
-| Dữ liệu | CAP/Balanced CAP, EDF/EDF+, Parquet, DVC, S3 |
-| Xử lý tín hiệu | MNE-Python, PyEDFlib, NumPy, SciPy, pandas |
-| Học máy | scikit-learn, XGBoost, LightGBM, RandomForest, MLflow |
-| Web framework | Django 4.2, Django REST Framework, Gunicorn |
-| Database/cache | PostgreSQL, Redis |
-| MLOps/monitoring | GitHub Actions, Docker, ECR, ECS Fargate, ALB, Evidently AI |
-| Infrastructure | Terraform, AWS IAM, Security Group, CloudWatch |
+| Nhóm              | Công nghệ                                                 |
+| ------------------ | ----------------------------------------------------------- |
+| Frontend           | Django Template, Bootstrap 5, Chart.js                      |
+| Dữ liệu          | CAP/Balanced CAP, EDF/EDF+, Parquet, DVC, S3                |
+| Xử lý tín hiệu | MNE-Python, PyEDFlib, NumPy, SciPy, pandas                  |
+| Học máy          | scikit-learn, XGBoost, LightGBM, RandomForest, MLflow       |
+| Web framework      | Django 4.2, Django REST Framework, Gunicorn                 |
+| Database/cache     | PostgreSQL, Redis                                           |
+| MLOps/monitoring   | GitHub Actions, Docker, ECR, ECS Fargate, ALB, Evidently AI |
+| Infrastructure     | Terraform, AWS IAM, Security Group, CloudWatch              |
 
 ## 2.2. Kết quả đạt được
 
@@ -625,7 +664,6 @@ Kết quả:
 File chính:
 
 - `training/train.py`
-- `training/sagemaker_train.py`
 - `models/metadata.json`
 
 Kết quả:
@@ -658,13 +696,13 @@ File chính:
 
 Endpoint:
 
-| Method | Endpoint | Chức năng |
-|---|---|---|
-| GET | `/api/v1/health/` | Health check cho ALB/ECS |
-| GET | `/api/v1/model-info/` | Trả metadata model đang phục vụ |
-| POST | `/api/v1/predict/` | Dự đoán từ batch feature 24 cột |
-| POST | `/api/v1/predict-edf/` | Upload EDF, trích xuất feature, dự đoán |
-| POST | `/api/v1/ingest/` | Lưu kết quả mô phỏng IoT vào database |
+| Method | Endpoint                 | Chức năng                                  |
+| ------ | ------------------------ | -------------------------------------------- |
+| GET    | `/api/v1/health/`      | Health check cho ALB/ECS                     |
+| GET    | `/api/v1/model-info/`  | Trả metadata model đang phục vụ          |
+| POST   | `/api/v1/predict/`     | Dự đoán từ batch feature 24 cột         |
+| POST   | `/api/v1/predict-edf/` | Upload EDF, trích xuất feature, dự đoán |
+| POST   | `/api/v1/ingest/`      | Lưu kết quả mô phỏng IoT vào database  |
 
 Ý nghĩa:
 
@@ -785,17 +823,17 @@ Kết quả:
 
 Thành phần chính:
 
-| Thành phần | Vai trò | Lý do chọn |
-|---|---|---|
-| ECR | Lưu Docker image | Tích hợp trực tiếp với ECS |
-| ECS Fargate | Chạy container Django | Không cần quản lý EC2 server, trả phí theo workload [26] |
-| ALB | Public endpoint và health check | Phân phối traffic, kiểm tra target health [28] |
+| Thành phần           | Vai trò                                             | Lý do chọn                                                                           |
+| ---------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| ECR                    | Lưu Docker image                                    | Tích hợp trực tiếp với ECS                                                        |
+| ECS Fargate            | Chạy container Django                               | Không cần quản lý EC2 server, trả phí theo workload [26]                         |
+| ALB                    | Public endpoint và health check                     | Phân phối traffic, kiểm tra target health [28]                                      |
 | MLflow Tracking Server | Lưu experiment, metric, artifact và Model Registry | Cần lịch sử huấn luyện/model version bền vững thay vì `mlruns` cục bộ [17] |
-| S3 | Lưu model artifact/dữ liệu | Object storage phù hợp artifact lớn [29] |
-| PostgreSQL/RDS | Lưu bệnh nhân và prediction | Dữ liệu quan hệ rõ ràng |
-| Redis | Cache inference | Giảm chi phí tính toán lặp lại |
-| CloudWatch | Log/metric | Quan sát runtime |
-| Terraform | Khai báo hạ tầng bằng code | Dễ tái lập, review và quản lý thay đổi [31] |
+| S3                     | Lưu model artifact/dữ liệu                        | Object storage phù hợp artifact lớn [29]                                            |
+| PostgreSQL/RDS         | Lưu bệnh nhân và prediction                      | Dữ liệu quan hệ rõ ràng                                                           |
+| Redis                  | Cache inference                                      | Giảm chi phí tính toán lặp lại                                                   |
+| CloudWatch             | Log/metric                                           | Quan sát runtime                                                                      |
+| Terraform              | Khai báo hạ tầng bằng code                       | Dễ tái lập, review và quản lý thay đổi [31]                                    |
 
 ## 2.3. Cấu trúc thư mục
 
@@ -1129,21 +1167,22 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
 ## Luồng trình bày đề xuất
 
 1. Giới thiệu bài toán:
+
    - Dữ liệu đến từ CAP Sleep/Balanced CAP.
    - Tín hiệu EEG được chia cửa sổ 2 giây.
    - Mỗi cửa sổ được biến thành 24 đặc trưng.
    - Mô hình phân loại 7 nhóm: `healthy`, `insomnia`, `narcolepsy`, `nfle`, `plm`, `rbd`, `sdb`.
-
 2. Mở web app:
+
    - Truy cập `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com`.
    - Vào dashboard tổng quan để xem số bệnh nhân, số epoch đã lưu và phân bố nhãn.
    - Vào trang Pipeline để chỉ ra model name, stage `Production`, tracking URI, artifact S3 và feature store S3.
-
 3. Kiểm tra API serving:
+
    - Mở `/api/v1/health/` để chứng minh service sống.
    - Mở `/api/v1/model-info/` để chứng minh model đã sẵn sàng, có 24 feature, có artifact sync S3 và có MLflow stage.
-
 4. Demo dự đoán bằng feature:
+
    - Vào trang Predict trên giao diện, nhập hoặc dán một batch 24 feature.
    - Hoặc gọi API:
      ```powershell
@@ -1153,8 +1192,8 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
        -d "{\"features\":[[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4]]}"
      ```
    - Giải thích rằng production serving sẽ ưu tiên MLflow Registry, nếu lỗi sẽ fallback `model.pkl` từ S3.
-
 5. Demo luồng IoT nhiều bệnh nhân:
+
    ```powershell
    python iot_simulation/multi_patient_demo.py `
      --url http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
@@ -1162,21 +1201,22 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
      --batch-size 5 `
      --workers 3
    ```
+
    - Script lấy thống kê feature, sinh epoch mô phỏng, gọi `/predict/`, rồi gửi kết quả vào `/ingest/`.
    - `/ingest/` lưu bệnh nhân và epoch vào PostgreSQL, đồng thời ghi feature batch ra `s3://sleep-mlops-651709/monitoring/current`.
-
 6. Quay lại dashboard:
+
    - Mở danh sách bệnh nhân.
    - Chọn một bệnh nhân, xem timeline epoch và phân bố dự đoán.
    - Đây là phần chứng minh dữ liệu mới đã đi vào hệ thống thật.
-
 7. Mở MLflow production:
+
    - Truy cập `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`.
    - Chọn experiment `sleep-disorder-kaggle`.
    - Chỉ ra các run train/retrain, metric `val_f1_weighted`, `val_accuracy`, artifact và model `sleep-disorder-classifier`.
    - Vào Model Registry để xem version đang ở stage `Production`.
-
 8. Demo monitoring drift:
+
    - Vào GitHub Actions -> `Monitoring - Drift Check` -> Run workflow.
    - Nhập:
      - `reference_data`: `s3://sleep-mlops-651709/features/reference/features.parquet`
@@ -1184,8 +1224,8 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
    - Sau khi chạy, mở artifact `drift-reports` để xem HTML report và `drift_summary_latest.json`.
    - Nếu chưa có batch `.parquet` trong `monitoring/current`, workflow sẽ ghi summary `skipped=true`, `skip_reason=no_current_data` và không retrain.
    - Nếu `alert=true`, workflow tự gọi `retrain.yml`.
-
 9. Demo retrain và promote:
+
    - Nếu muốn chủ động, chạy GitHub Actions -> `Retrain - Promote - Redeploy` -> Run workflow.
    - Dùng:
      - `training_data`: `s3://sleep-mlops-651709/features/reference/features.parquet`
@@ -1194,8 +1234,8 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
      - `model_type`: `all`
      - `deploy_after_success`: `true`
    - Workflow sẽ train XGBoost/LightGBM/RandomForest, chọn weighted F1 tốt nhất, promote lên `Production` nếu vượt ngưỡng, upload artifact S3 và gọi lại `ci.yml`.
-
 10. Demo CI/CD redeploy:
+
     - Mở workflow `CI/CD - Build, Test, Deploy`.
     - Chỉ ra các bước: test -> build Docker -> push ECR -> ensure ALB -> register ECS task definition -> deploy -> migrate -> smoke test.
     - Sau khi xanh, mở lại `/api/v1/model-info/` để xác nhận app đang chạy task mới và vẫn ready.
@@ -1203,244 +1243,6 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
 ## Lời thoại ngắn khi demo
 
 “Project này không chỉ train model trong notebook. Notebook Kaggle là quy chuẩn feature và mô hình; phần production biến nó thành hệ thống MLOps: web app nhận EEG/feature, model phục vụ qua API, dữ liệu mới được lưu vào feature store, drift được kiểm tra định kỳ, retrain được kích hoạt khi cần, MLflow lưu toàn bộ lịch sử huấn luyện và Model Registry quyết định version `Production`, còn GitHub Actions tự build/deploy lại ECS. Vì metric hiện mới khoảng 0.59 weighted F1, hệ thống phù hợp để demo kỹ thuật và quy trình MLOps, chưa được dùng như công cụ chẩn đoán y khoa.”
-
----
-
-# Prompt tạo sơ đồ bằng ChatGPT Image
-
-Các prompt dưới đây dùng để tạo hình minh họa cho các sơ đồ trong chương phân tích - thiết kế. Khi tạo ảnh, ưu tiên nền sáng, chữ rõ, bố cục ngang 16:9, icon công nghệ vừa phải, mũi tên rõ hướng. Không thêm các thành phần project không dùng như SageMaker, Prefect, Redis, CloudFront, MQTT hoặc EC2 MLflow server.
-
-## Prompt 1 - Sơ đồ kiến trúc MLOps tổng thể
-
-```text
-Tạo sơ đồ kỹ thuật 16:9 cho project “Sleep Disorder Detection — Production MLOps Architecture”. Nền sáng, chia thành các layer màu khác nhau, có icon công nghệ và mũi tên luồng dữ liệu.
-
-Các layer:
-1. Data Source & Simulation: CAP Sleep / Balanced CAP Dataset, EEG EDF files, extracted EEG features, Python IoT Simulator, Django ingest API /api/v1/ingest/.
-2. Feature Engineering & Training: notebook chuẩn kaggle_cap_training.ipynb, MNE/NumPy/SciPy/pandas, epoch window 2 seconds, Feature Builder tạo 24 EEG features, model XGBoost/LightGBM/RandomForest, 7 classes healthy/insomnia/narcolepsy/nfle/plm/rbd/sdb.
-3. MLflow Model Management: MLflow Tracking Server chạy trên AWS ECS Fargate, backend store AWS RDS PostgreSQL, artifact store AWS S3, MLflow Model Registry, model sleep-disorder-classifier stage Production.
-4. Serving & Web App: Django Web App + Django REST Framework, Dashboard UI, Inference Service, load model từ MLflow Registry Production, fallback artifact S3, AWS ECS Fargate, AWS Application Load Balancer, AWS RDS PostgreSQL lưu patient metadata và prediction history.
-5. CI/CD: GitHub Actions, pytest, Docker build, AWS ECR, deploy ECS, Django migrate, smoke test health/model-info.
-6. Monitoring & Retraining: S3 reference feature store, S3 current feature store, Evidently AI drift detection, monitoring.yml schedule/manual, retrain.yml, weighted F1 threshold 0.55, auto redeploy.
-
-Thể hiện vòng lặp nét đứt: Production App -> S3 Current Feature Store -> Evidently Drift Check -> Retrain Workflow -> MLflow Registry -> CI/CD Redeploy -> Production App.
-```
-
-## Prompt 2 - Sơ đồ chức năng tổng quát
-
-```text
-Tạo sơ đồ chức năng tổng quát dạng tree/functional decomposition cho hệ thống “Phân tích dữ liệu cảm biến giấc ngủ để phát hiện rối loạn”.
-
-Root: Sleep Disorder Detection System.
-Nhánh chính:
-- Quản lý dữ liệu giấc ngủ: đọc EDF/CSV, nhận feature từ API, lưu feature batch lên S3.
-- Tiền xử lý và trích xuất đặc trưng: bandpass filter, epoch 2 seconds, tính 24 EEG features.
-- Huấn luyện mô hình: train XGBoost, LightGBM, RandomForest, đánh giá weighted F1, lưu artifact.
-- Phục vụ dự đoán: REST API /predict, /predict-file, /ingest, load model từ MLflow Production.
-- Dashboard: tổng quan hệ thống, danh sách bệnh nhân, chi tiết prediction timeline, model info, pipeline status.
-- MLOps: GitHub Actions CI/CD, MLflow Tracking/Registry, Evidently drift monitoring, retrain và redeploy tự động.
-
-Thiết kế rõ, nhãn tiếng Việt có dấu, có icon nhỏ cho từng nhóm chức năng.
-```
-
-## Prompt 3 - Biểu đồ Use Case
-
-```text
-Tạo biểu đồ Use Case UML cho hệ thống Sleep Disorder Detection MLOps.
-
-Actors:
-- Người dùng / Sinh viên demo
-- Kỹ sư MLOps / Developer
-- GitHub Actions
-- AWS Cloud
-- MLflow Tracking Server
-
-Use cases của Người dùng:
-- Xem dashboard tổng quan
-- Upload hoặc gửi dữ liệu EEG/feature
-- Xem kết quả dự đoán rối loạn giấc ngủ
-- Xem hồ sơ bệnh nhân và lịch sử epoch
-- Xem thông tin model production
-
-Use cases của Developer/MLOps:
-- Push code lên GitHub
-- Chạy CI/CD deploy
-- Theo dõi drift report
-- Kích hoạt retrain thủ công
-- Kiểm tra MLflow experiment và Model Registry
-
-Use cases tự động:
-- GitHub Actions chạy pytest, build Docker, push ECR, deploy ECS
-- Monitoring đọc S3 reference/current data, chạy Evidently AI
-- Khi drift vượt ngưỡng, tự gọi retrain.yml
-- Retrain log metric/artifact vào MLflow, promote model Production, trigger redeploy.
-
-Dùng ký hiệu UML use case chuẩn: actor hình người, oval use case, system boundary, quan hệ include/extend nếu phù hợp.
-```
-
-## Prompt 4 - Biểu đồ hoạt động
-
-```text
-Tạo activity diagram UML cho quy trình MLOps của project Sleep Disorder Detection.
-
-Luồng chính:
-Start -> Nhận dữ liệu EEG/feature từ simulator hoặc API /ingest/ -> Lưu patient metadata vào PostgreSQL -> Ghi feature batch vào S3 current feature store -> Monitoring theo lịch đọc reference và current data -> Kiểm tra current data có tồn tại không.
-
-Nhánh 1: Nếu chưa có current data -> Ghi summary skipped=true, alert=false -> End.
-Nhánh 2: Nếu có current data -> Evidently AI tính data drift -> Drift share > threshold?
-Nếu No -> Ghi drift report, không retrain -> End.
-Nếu Yes -> Trigger retrain.yml -> Train XGBoost/LightGBM/RandomForest -> Log MLflow metrics/artifacts -> Weighted F1 >= promotion threshold?
-Nếu No -> Không promote, giữ model cũ -> End.
-Nếu Yes -> Promote model lên Production trong MLflow Registry -> Trigger CI/CD -> Build Docker image -> Push ECR -> Deploy ECS Fargate -> Smoke test health/model-info -> End.
-
-Vẽ bằng swimlane cho các lane: Django App, S3, GitHub Actions, Evidently AI, MLflow, AWS ECS.
-```
-
-## Prompt 5 - Biểu đồ trình tự
-
-```text
-Tạo sequence diagram UML cho luồng dự đoán và lưu dữ liệu mới của Sleep Disorder Detection.
-
-Participants:
-User/Dashboard, Python IoT Simulator, Django REST API, Inference Service, MLflow Registry, AWS S3 Artifact Store, PostgreSQL Database, S3 Current Feature Store.
-
-Sequence:
-1. User hoặc Simulator gửi POST /api/v1/predict hoặc POST /api/v1/ingest.
-2. Django REST API validate payload.
-3. Inference Service load model từ MLflow Registry stage Production.
-4. Nếu MLflow chưa sẵn sàng, Inference Service fallback tải model artifact từ S3.
-5. Inference Service trả prediction label và confidence.
-6. Django API lưu Patient và EpochPrediction vào PostgreSQL.
-7. Django API ghi batch 24 EEG features vào S3 current feature store.
-8. API trả response gồm patient_id, epochs_saved, feature_rows_saved và prediction summary.
-
-Thêm alternate fragment cho fallback S3 artifact khi MLflow Registry lỗi.
-```
-
-## Prompt 6 - Biểu đồ lớp
-
-```text
-Tạo UML class diagram cho Django project Sleep Disorder Detection.
-
-Các lớp/chức năng chính:
-- Patient: patient_id, diagnosis, age, gender, created_at, updated_at.
-- EpochPrediction: patient, epoch_index, predicted_class, confidence, timestamp.
-- IngestView: post(request), validate patient_id, save Patient, save EpochPrediction, write feature batch.
-- PredictView: post(request), validate features, call inference service, return prediction.
-- PredictFileView: post(request), receive EDF/file, extract features, call model.
-- InferenceService: load_model(), predict(features), get_model_status().
-- FeatureStore: build_ingest_feature_frame(), write_ingest_feature_batch().
-- DriftDetection: load reference/current parquet, run Evidently report, write drift summary.
-- TrainingPipeline: train models, evaluate weighted F1, log MLflow, promote best model.
-
-Thể hiện quan hệ:
-Patient 1 -> many EpochPrediction.
-Views sử dụng InferenceService và FeatureStore.
-TrainingPipeline ghi vào MLflow Registry và S3 Artifact Store.
-DriftDetection đọc S3 Reference/Current Feature Store.
-```
-
-## Prompt 7 - Biểu đồ luồng dữ liệu / Database diagram
-
-```text
-Tạo Data Flow Diagram level 1 cho Sleep Disorder Detection MLOps.
-
-External entities:
-- User/Dashboard
-- Python IoT Simulator
-- GitHub Actions
-
-Processes:
-P1 Ingest EEG features
-P2 Run inference
-P3 Store patient predictions
-P4 Monitor data drift
-P5 Retrain and promote model
-P6 Deploy production app
-
-Data stores:
-D1 AWS RDS PostgreSQL: Patient, EpochPrediction
-D2 AWS S3 Reference Feature Store: features/reference/features.parquet
-D3 AWS S3 Current Feature Store: monitoring/current/*.parquet
-D4 AWS S3 Model Artifacts: model.pkl, label_encoder.pkl, feature_names.json, metadata.json
-D5 MLflow Backend Store: experiments, runs, metrics, model registry
-D6 AWS ECR: Docker image
-
-Luồng:
-Simulator/User -> P1 -> D1 và D3.
-P2 đọc model từ MLflow Registry/S3 artifact -> trả prediction.
-P4 đọc D2 và D3 -> tạo drift report.
-Nếu drift alert -> P5 đọc training data, ghi MLflow/S3 artifacts -> P6 build/deploy ECS.
-P6 cập nhật app production sau ALB.
-```
-
-## Prompt 8 - Biểu đồ ERD quan hệ dữ liệu
-
-```text
-Tạo ERD cho database và data stores của Sleep Disorder Detection.
-
-Database chính PostgreSQL:
-Table Patient:
-- id PK
-- patient_id unique
-- diagnosis
-- age
-- gender
-- created_at
-- updated_at
-
-Table EpochPrediction:
-- id PK
-- patient_id FK -> Patient.id
-- epoch_index
-- predicted_class
-- confidence
-- timestamp
-- created_at
-Constraint: unique(patient_id, epoch_index)
-
-Data lake S3:
-- reference_features parquet: 24 EEG feature columns + label/disease metadata.
-- current_features parquet: 24 EEG feature columns + patient_id, epoch_index, timestamp, diagnosis, predicted_class, confidence, ingested_at.
-- model_artifacts: model.pkl, model.ubj, label_encoder.pkl, feature_names.json, metadata.json.
-
-MLflow/RDS backend:
-- Experiment
-- Run
-- Metric
-- Param
-- Artifact URI
-- Registered Model
-- Model Version
-
-Vẽ rõ quan hệ Patient 1-n EpochPrediction, current_features liên hệ logic với Patient bằng patient_id, Model Version trỏ tới artifact URI trên S3.
-```
-
-## Prompt 9 - Thiết kế giao diện chính
-
-```text
-Tạo một ảnh tổng hợp 4 màn hình giao diện chính của web app Sleep Disorder Detection, dạng dashboard UI hiện đại.
-
-Màn hình 1: Overview dashboard có cards Health, Model Ready, Feature Count 24, Production Stage, Recent Predictions.
-Màn hình 2: Patient list table gồm patient_id, diagnosis, age, gender, number of epochs, updated_at.
-Màn hình 3: Patient detail gồm biểu đồ timeline epoch predictions, phân bố predicted_class, bảng confidence.
-Màn hình 4: MLOps pipeline status gồm CI/CD, MLflow, S3 Artifact Store, Feature Store, Monitoring Drift, Retrain workflow.
-
-Phong cách: giao diện data/healthcare analytics, sạch, dễ đọc, không giống landing page, màu nền sáng, bảng và biểu đồ rõ ràng, nhãn tiếng Việt có dấu.
-```
-
-## Prompt 10 - Sơ đồ giải thuật học máy
-
-```text
-Tạo sơ đồ thuật toán học máy cho project “Phân tích EEG để phát hiện rối loạn giấc ngủ”.
-
-Luồng:
-CAP Sleep EDF/CSV -> chọn kênh EEG -> bandpass filter -> chia epoch 2 giây -> trích xuất 24 features:
-delta_power, theta_power, alpha_power, beta_power, gamma_power, relative band powers, entropy, statistical features.
-Sau đó LabelEncoder mã hóa 7 lớp healthy/insomnia/narcolepsy/nfle/plm/rbd/sdb -> train/validation split -> train XGBoost, LightGBM, RandomForest -> đánh giá weighted F1, accuracy, classification report -> chọn best model -> log MLflow -> register model -> promote Production nếu vượt threshold -> export serving artifacts lên S3 -> web app serving.
-
-Thể hiện các nhánh model song song và bước chọn best model bằng biểu tượng decision diamond.
-```
 
 ---
 
@@ -1513,3 +1315,5 @@ Thể hiện các nhánh model song song và bước chọn best model bằng bi
 [33] SHAP documentation. https://shap.readthedocs.io/
 
 [34] scikit-learn, Probability calibration. https://scikit-learn.org/stable/modules/calibration.html
+
+[35] Amazon CloudWatch documentation. https://docs.aws.amazon.com/cloudwatch/
