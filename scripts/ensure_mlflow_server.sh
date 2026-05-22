@@ -185,7 +185,7 @@ CONTAINER_DEFINITIONS=$(jq -n \
       image: $image,
       essential: true,
       portMappings: [{containerPort: ($port | tonumber), protocol: "tcp"}],
-      environment: [
+      environment: ([
         {name: "MLFLOW_BACKEND_STORE_URI", value: $backend},
         {name: "MLFLOW_ARTIFACTS_DESTINATION", value: $artifacts},
         {name: "AWS_DEFAULT_REGION", value: $region}
@@ -198,7 +198,7 @@ CONTAINER_DEFINITIONS=$(jq -n \
         else
           []
         end
-      ),
+      )),
       logConfiguration: {
         logDriver: "awslogs",
         options: {
