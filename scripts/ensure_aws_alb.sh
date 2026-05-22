@@ -165,6 +165,24 @@ PY
       >/dev/null
   done
 fi
+
+declare -A SEEN_AZS=()
+UNIQUE_PUBLIC_SUBNETS=()
+for subnet_id in "${PUBLIC_SUBNETS[@]}"; do
+  AZ=$(aws ec2 describe-subnets \
+    --subnet-ids "$subnet_id" \
+    --query "Subnets[0].AvailabilityZone" \
+    --output text)
+  if [[ -z "${SEEN_AZS[$AZ]:-}" ]]; then
+    UNIQUE_PUBLIC_SUBNETS+=("$subnet_id")
+    SEEN_AZS[$AZ]=1
+  fi
+done
+PUBLIC_SUBNETS=("${UNIQUE_PUBLIC_SUBNETS[@]}")
+if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 ]]; then
+  echo "ALB needs public subnets in at least two availability zones." >&2
+  exit 1
+fi
 echo "Public subnets: ${PUBLIC_SUBNETS[*]}"
 
 ALB_SG_ID=$(aws ec2 describe-security-groups \
