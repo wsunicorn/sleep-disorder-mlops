@@ -758,7 +758,7 @@ Kết quả:
 - Nếu `alert=true`, workflow monitoring tự gọi workflow retrain.
 - Retrain workflow chạy `training/train.py` ngay trên GitHub Actions, ghép dữ liệu nền với dữ liệu mới bằng `--extra-data`, log run vào MLflow Tracking Server production, đăng ký model vào MLflow Model Registry, promote model tốt nhất lên stage `Production` nếu weighted F1 vượt ngưỡng, upload artifact model lên S3, rồi kích hoạt lại CI/CD deploy.
 - Workflow `mlflow.yml` build Docker image riêng cho MLflow, deploy thành ECS service riêng, dùng RDS PostgreSQL làm backend store và S3 làm artifact store.
-- `scripts/ensure_ecs_task_role.sh` tạo/gán ECS task role có quyền đọc/ghi S3 để cả web app và MLflow server truy cập artifact/feature store bằng IAM role thay vì hard-code secret trong container.
+- `scripts/ensure_ecs_task_role.sh` ưu tiên tạo/gán ECS task role có quyền đọc/ghi S3 để web app và MLflow server truy cập artifact/feature store bằng IAM role. Nếu AWS user không có quyền tạo IAM role, workflow fallback sang AWS credentials từ GitHub Secrets để demo vẫn chạy được; khi vận hành lâu dài nên cấp IAM task role chính thức.
 - CI/CD build image mới bằng artifact vừa upload, push ECR và deploy ECS Fargate.
 - Ứng dụng cũng có cấu hình `MODEL_ARTIFACT_S3_URI` để đồng bộ model artifact mới khi container khởi động.
 
@@ -852,6 +852,7 @@ Hạn chế hiện tại:
 - Chưa có calibration, uncertainty estimation hoặc giải thích dự đoán.
 - Vòng retrain hiện dùng nhãn/pseudo-label từ dữ liệu ingest nếu chưa có nhãn bác sĩ xác nhận, nên cần quy trình kiểm duyệt dữ liệu trước khi dùng thật.
 - MLflow production đã được tách thành ECS service riêng, nhưng hiện vẫn đang public qua ALB port `5000`; nếu dùng lâu dài nên thêm xác thực, HTTPS/domain riêng hoặc giới hạn IP.
+- AWS user hiện tại không có quyền tạo IAM role mới trong workflow. Hệ thống có fallback dùng GitHub Secrets cho ECS task khi thiếu task role, nhưng bản production chặt chẽ hơn nên provision IAM task role bằng Terraform/admin.
 - Terraform và script AWS CLI đang cùng tồn tại; về lâu dài nên đưa toàn bộ hạ tầng về Terraform state để tránh lệch trạng thái.
 - Giao diện và thông điệp cảnh báo y tế cần được làm rõ hơn nếu demo cho người không chuyên.
 

@@ -176,6 +176,9 @@ CONTAINER_DEFINITIONS=$(jq -n \
   --arg artifacts "$MLFLOW_ARTIFACTS_DESTINATION" \
   --arg region "${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-southeast-1}}" \
   --arg log_group "$LOG_GROUP" \
+  --arg task_role "$TASK_ROLE_ARN" \
+  --arg aws_access_key_id "${AWS_ACCESS_KEY_ID:-}" \
+  --arg aws_secret_access_key "${AWS_SECRET_ACCESS_KEY:-}" \
   '[
     {
       name: $name,
@@ -186,7 +189,16 @@ CONTAINER_DEFINITIONS=$(jq -n \
         {name: "MLFLOW_BACKEND_STORE_URI", value: $backend},
         {name: "MLFLOW_ARTIFACTS_DESTINATION", value: $artifacts},
         {name: "AWS_DEFAULT_REGION", value: $region}
-      ],
+      ] + (
+        if $task_role == "" and $aws_access_key_id != "" and $aws_secret_access_key != "" then
+          [
+            {name: "AWS_ACCESS_KEY_ID", value: $aws_access_key_id},
+            {name: "AWS_SECRET_ACCESS_KEY", value: $aws_secret_access_key}
+          ]
+        else
+          []
+        end
+      ),
       logConfiguration: {
         logDriver: "awslogs",
         options: {
