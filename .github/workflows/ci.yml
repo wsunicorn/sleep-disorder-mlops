@@ -18,7 +18,9 @@ env:
   ECS_CLUSTER: sleep-portal-cluster
   ECS_SERVICE: sleep-portal-service
   MODEL_ARTIFACT_S3_URI: s3://sleep-mlops-651709/models
+  MODEL_ARTIFACT_LOCAL_DIR: /app/models
   MLOPS_FEATURE_STORE_S3_URI: s3://sleep-mlops-651709/monitoring/current
+  MLOPS_FEATURE_STORE_LOCAL_DIR: /tmp/sleep-portal/monitoring/current
 
 jobs:
   # ─── Job 1: Unit Tests ──────────────────────────────────────
@@ -150,7 +152,9 @@ jobs:
           jq \
             --arg IMAGE "${{ needs.build-and-push.outputs.image }}" \
             --arg MODEL_ARTIFACT_S3_URI "$MODEL_ARTIFACT_S3_URI" \
+            --arg MODEL_ARTIFACT_LOCAL_DIR "$MODEL_ARTIFACT_LOCAL_DIR" \
             --arg MLOPS_FEATURE_STORE_S3_URI "$MLOPS_FEATURE_STORE_S3_URI" \
+            --arg MLOPS_FEATURE_STORE_LOCAL_DIR "$MLOPS_FEATURE_STORE_LOCAL_DIR" \
             '
             def upsert_env($name; $value):
               .environment = ((.environment // []) | map(select(.name != $name)) + [{"name": $name, "value": $value}]);
@@ -159,7 +163,9 @@ jobs:
               if .name == "sleep-portal" then
                 .image = $IMAGE
                 | upsert_env("MODEL_ARTIFACT_S3_URI"; $MODEL_ARTIFACT_S3_URI)
+                | upsert_env("MODEL_ARTIFACT_LOCAL_DIR"; $MODEL_ARTIFACT_LOCAL_DIR)
                 | upsert_env("MLOPS_FEATURE_STORE_S3_URI"; $MLOPS_FEATURE_STORE_S3_URI)
+                | upsert_env("MLOPS_FEATURE_STORE_LOCAL_DIR"; $MLOPS_FEATURE_STORE_LOCAL_DIR)
               else
                 .
               end

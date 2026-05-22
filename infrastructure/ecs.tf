@@ -46,7 +46,9 @@ resource "aws_ecs_task_definition" "app" {
         { name = "MLFLOW_MODEL_NAME",      value = "sleep-disorder-classifier" },
         { name = "MLFLOW_MODEL_STAGE",     value = "None" },
         { name = "MODEL_ARTIFACT_S3_URI",  value = "s3://sleep-mlops-651709/models" },
+        { name = "MODEL_ARTIFACT_LOCAL_DIR", value = "/app/models" },
         { name = "MLOPS_FEATURE_STORE_S3_URI", value = "s3://sleep-mlops-651709/monitoring/current" },
+        { name = "MLOPS_FEATURE_STORE_LOCAL_DIR", value = "/tmp/sleep-portal/monitoring/current" },
         { name = "REDIS_URL",              value = "" },
         {
           name  = "DATABASE_URL"
