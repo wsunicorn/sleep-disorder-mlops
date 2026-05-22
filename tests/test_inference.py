@@ -41,6 +41,22 @@ class TestGetModelStatus:
             status = get_model_status()
         assert status["ready"] is True
 
+    def test_artifact_sync_error_does_not_break_status(self, settings):
+        from inference import predictor
+
+        predictor._artifact_sync_status = None
+        settings.MODEL_ARTIFACT_S3_URI = "s3://example-bucket/models"
+        with patch(
+            "inference.predictor.sync_model_artifacts_once",
+            side_effect=RuntimeError("sync failed"),
+        ), patch("inference.predictor._get_model", side_effect=Exception("no model")):
+            status = predictor.get_model_status()
+
+        assert status["artifact_sync"]["enabled"] is True
+        assert "sync failed" in status["artifact_sync"]["error"]
+        assert status["ready"] is False
+        predictor._artifact_sync_status = None
+
 
 # ── predict ───────────────────────────────────────────────────────────────────
 

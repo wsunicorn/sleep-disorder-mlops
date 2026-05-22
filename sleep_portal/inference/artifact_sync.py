@@ -77,13 +77,16 @@ def sync_model_artifacts_once(
         except Exception as exc:
             logger.warning(f"Could not download s3://{bucket}/{key}: {exc}")
 
-    marker = {
-        "artifact_uri": artifact_uri,
-        "downloaded": downloaded,
-        "synced_at": datetime.now(tz=timezone.utc).isoformat(),
-    }
-    (output_dir / ".artifact_sync.json").write_text(
-        json.dumps(marker, indent=2),
-        encoding="utf-8",
-    )
+    try:
+        marker = {
+            "artifact_uri": artifact_uri,
+            "downloaded": downloaded,
+            "synced_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+        (output_dir / ".artifact_sync.json").write_text(
+            json.dumps(marker, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning(f"Could not write artifact sync marker: {exc}")
     return {"enabled": True, "downloaded": downloaded, "error": None}

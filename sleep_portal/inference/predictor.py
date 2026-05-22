@@ -40,11 +40,18 @@ def _sync_artifacts_if_configured() -> dict:
     if _artifact_sync_status is not None:
         return _artifact_sync_status
 
-    _artifact_sync_status = sync_model_artifacts_once(
-        artifact_uri=getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
-        local_dir=getattr(settings, "MODEL_ARTIFACT_LOCAL_DIR", "models"),
-        aws_region=getattr(settings, "AWS_DEFAULT_REGION", None),
-    )
+    try:
+        _artifact_sync_status = sync_model_artifacts_once(
+            artifact_uri=getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
+            local_dir=getattr(settings, "MODEL_ARTIFACT_LOCAL_DIR", "models"),
+            aws_region=getattr(settings, "AWS_DEFAULT_REGION", None),
+        )
+    except Exception as exc:
+        _artifact_sync_status = {
+            "enabled": bool(getattr(settings, "MODEL_ARTIFACT_S3_URI", "")),
+            "downloaded": [],
+            "error": str(exc),
+        }
     if _artifact_sync_status.get("downloaded"):
         logger.info(f"Synced model artifacts: {_artifact_sync_status['downloaded']}")
     elif _artifact_sync_status.get("error"):
