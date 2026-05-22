@@ -744,6 +744,7 @@ File chính:
 - `monitoring/retrain_flow.py`
 - `monitoring/promote_rules.py`
 - `scripts/export_reference_features.py`
+- `scripts/ensure_ecs_task_role.sh`
 - `scripts/ensure_mlflow_server.sh`
 - `training/train.py`
 
@@ -757,6 +758,7 @@ Kết quả:
 - Nếu `alert=true`, workflow monitoring tự gọi workflow retrain.
 - Retrain workflow chạy `training/train.py` ngay trên GitHub Actions, ghép dữ liệu nền với dữ liệu mới bằng `--extra-data`, log run vào MLflow Tracking Server production, đăng ký model vào MLflow Model Registry, promote model tốt nhất lên stage `Production` nếu weighted F1 vượt ngưỡng, upload artifact model lên S3, rồi kích hoạt lại CI/CD deploy.
 - Workflow `mlflow.yml` build Docker image riêng cho MLflow, deploy thành ECS service riêng, dùng RDS PostgreSQL làm backend store và S3 làm artifact store.
+- `scripts/ensure_ecs_task_role.sh` tạo/gán ECS task role có quyền đọc/ghi S3 để cả web app và MLflow server truy cập artifact/feature store bằng IAM role thay vì hard-code secret trong container.
 - CI/CD build image mới bằng artifact vừa upload, push ECR và deploy ECS Fargate.
 - Ứng dụng cũng có cấu hình `MODEL_ARTIFACT_S3_URI` để đồng bộ model artifact mới khi container khởi động.
 
@@ -975,6 +977,7 @@ Nếu chỉ scale ECS service về 0 hoặc xóa ALB, workflow hiện tại có 
 
 - ECS service được update về `desired-count 1`.
 - `scripts/ensure_aws_alb.sh` tìm hoặc tạo lại ALB, target group, listener.
+- `scripts/ensure_ecs_task_role.sh` đảm bảo ECS task có IAM role để đọc/ghi S3 artifact.
 - `scripts/ensure_mlflow_server.sh` tìm hoặc tạo lại target group/listener port `5000` và ECS service `sleep-portal-mlflow-service`.
 - Nếu listener đã đúng target group, script bỏ qua `ModifyListener` để tránh lỗi IAM không cần thiết.
 

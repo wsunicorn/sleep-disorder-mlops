@@ -140,6 +140,9 @@ jobs:
       - name: Ensure public ALB
         run: bash scripts/ensure_aws_alb.sh
 
+      - name: Ensure ECS task role
+        run: bash scripts/ensure_ecs_task_role.sh
+
       - name: Register ECS task definition
         id: task-def
         run: |
@@ -161,6 +164,7 @@ jobs:
             --arg MLFLOW_TRACKING_URI "$APP_URL:$MLFLOW_PORT" \
             --arg MLFLOW_MODEL_NAME "$MLFLOW_MODEL_NAME" \
             --arg MLFLOW_MODEL_STAGE "$MLFLOW_MODEL_STAGE" \
+            --arg ECS_TASK_ROLE_ARN "$ECS_TASK_ROLE_ARN" \
             '
             def upsert_env($name; $value):
               .environment = ((.environment // []) | map(select(.name != $name)) + [{"name": $name, "value": $value}]);
@@ -179,6 +183,7 @@ jobs:
                 .
               end
             )
+            | .taskRoleArn = $ECS_TASK_ROLE_ARN
             | del(
                 .taskDefinitionArn,
                 .revision,

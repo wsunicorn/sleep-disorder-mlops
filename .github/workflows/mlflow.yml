@@ -7,6 +7,7 @@ on:
       - ".github/workflows/mlflow.yml"
       - "docker/Dockerfile.mlflow"
       - "scripts/ensure_mlflow_server.sh"
+      - "scripts/ensure_ecs_task_role.sh"
       - "scripts/ensure_aws_alb.sh"
   workflow_dispatch:
     inputs:
@@ -59,6 +60,9 @@ jobs:
 
       - name: Ensure web ALB exists
         run: bash scripts/ensure_aws_alb.sh
+
+      - name: Ensure ECS task role
+        run: bash scripts/ensure_ecs_task_role.sh
 
       - name: Deploy MLflow server to ECS
         env:

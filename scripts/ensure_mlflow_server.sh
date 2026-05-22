@@ -62,7 +62,13 @@ if not_found "$DATABASE_URL"; then
 fi
 
 EXECUTION_ROLE_ARN=$(jq -r '.executionRoleArn' <<< "$APP_TASK_JSON")
-TASK_ROLE_ARN=$(jq -r '.taskRoleArn' <<< "$APP_TASK_JSON")
+TASK_ROLE_ARN="${ECS_TASK_ROLE_ARN:-$(jq -r '.taskRoleArn // empty' <<< "$APP_TASK_JSON")}"
+if not_found "$TASK_ROLE_ARN"; then
+  TASK_ROLE_ARN=$(aws iam get-role \
+    --role-name "${ECS_TASK_ROLE_NAME:-${PROJECT_NAME}-ecs-task-role}" \
+    --query "Role.Arn" \
+    --output text 2>/dev/null || true)
+fi
 CPU="${MLFLOW_TASK_CPU:-512}"
 MEMORY="${MLFLOW_TASK_MEMORY:-1024}"
 
