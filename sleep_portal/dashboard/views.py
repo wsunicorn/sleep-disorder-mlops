@@ -154,6 +154,7 @@ def pipeline_page(request):
             "feature_store_s3_uri": getattr(settings, "MLOPS_FEATURE_STORE_S3_URI", ""),
             "monitoring_ready": (workflow_root / "monitoring.yml").exists(),
             "retrain_ready": (workflow_root / "retrain.yml").exists(),
+            "mlflow_ready": (workflow_root / "mlflow.yml").exists(),
             "ci_ready": (workflow_root / "ci.yml").exists(),
         },
     )

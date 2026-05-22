@@ -32,6 +32,26 @@ resource "aws_lb_target_group" "app" {
   tags = { Name = "${var.project}-tg" }
 }
 
+resource "aws_lb_target_group" "mlflow" {
+  name        = "${var.project}-mlflow-tg"
+  port        = var.mlflow_port
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/"
+    protocol            = "HTTP"
+    interval            = 30
+    timeout             = 10
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    matcher             = "200-399"
+  }
+
+  tags = { Name = "${var.project}-mlflow-tg" }
+}
+
 # ── HTTP listener (port 80) ───────────────────────────────────────────────────
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
@@ -41,5 +61,16 @@ resource "aws_lb_listener" "http" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
+  }
+}
+
+resource "aws_lb_listener" "mlflow" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = var.mlflow_port
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.mlflow.arn
   }
 }

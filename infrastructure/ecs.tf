@@ -42,9 +42,9 @@ resource "aws_ecs_task_definition" "app" {
       environment = [
         { name = "DJANGO_SETTINGS_MODULE", value = "sleep_portal.settings.production" },
         { name = "DJANGO_ALLOWED_HOSTS",   value = var.django_allowed_hosts },
-        { name = "MLFLOW_TRACKING_URI",    value = "mlruns" },
+        { name = "MLFLOW_TRACKING_URI",    value = "http://${aws_lb.main.dns_name}:${var.mlflow_port}" },
         { name = "MLFLOW_MODEL_NAME",      value = "sleep-disorder-classifier" },
-        { name = "MLFLOW_MODEL_STAGE",     value = "None" },
+        { name = "MLFLOW_MODEL_STAGE",     value = "Production" },
         { name = "MODEL_ARTIFACT_S3_URI",  value = "s3://sleep-mlops-651709/models" },
         { name = "MODEL_ARTIFACT_LOCAL_DIR", value = "/app/models" },
         { name = "MLOPS_FEATURE_STORE_S3_URI", value = "s3://sleep-mlops-651709/monitoring/current" },
@@ -105,4 +105,84 @@ resource "aws_ecs_service" "app" {
   depends_on = [aws_lb_listener.http]
 
   tags = { Name = "${var.project}-service" }
+}
+
+resource "aws_ecs_task_definition" "mlflow" {
+  family                   = "${var.project}-mlflow-task"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.mlflow_task_cpu
+  memory                   = var.mlflow_task_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "mlflow-server"
+      image     = "${aws_ecr_repository.app.repository_url}:${var.mlflow_image_tag}"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.mlflow_port
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = [
+        {
+          name  = "MLFLOW_BACKEND_STORE_URI"
+          value = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+        },
+        { name = "MLFLOW_ARTIFACTS_DESTINATION", value = var.mlflow_artifacts_destination },
+        { name = "AWS_DEFAULT_REGION",          value = var.aws_region },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "mlflow"
+        }
+      }
+
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -f http://localhost:${var.mlflow_port}/ || exit 1"]
+        interval    = 30
+        timeout     = 10
+        retries     = 3
+        startPeriod = 60
+      }
+    }
+  ])
+
+  tags = { Name = "${var.project}-mlflow-task" }
+}
+
+resource "aws_ecs_service" "mlflow" {
+  name            = "${var.project}-mlflow-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.mlflow.arn
+  desired_count   = var.mlflow_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.mlflow.arn
+    container_name   = "mlflow-server"
+    container_port   = var.mlflow_port
+  }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+
+  depends_on = [aws_lb_listener.mlflow]
+
+  tags = { Name = "${var.project}-mlflow-service" }
 }

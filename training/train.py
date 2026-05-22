@@ -16,6 +16,7 @@ import json
 import os
 import pickle
 import subprocess
+import time
 from pathlib import Path
 
 import mlflow
@@ -397,6 +398,84 @@ def export_artifacts(
         logger.warning(f"Could not log serving artifacts to MLflow: {exc}")
 
 
+def promote_best_model(
+    best_name: str,
+    results: dict[str, dict[str, object]],
+    stage: str,
+    threshold: float,
+    require_promotion: bool,
+) -> dict[str, object]:
+    """Promote the registered MLflow model version that belongs to the best run."""
+    if not stage:
+        return {"promoted": False, "reason": "promotion stage is empty"}
+
+    best_f1 = float(results[best_name]["f1"])
+    best_run_id = str(results[best_name]["run_id"])
+    if best_f1 < threshold:
+        message = (
+            f"Best model {best_name} F1={best_f1:.4f} is below "
+            f"promotion threshold {threshold:.4f}"
+        )
+        if require_promotion:
+            raise RuntimeError(message)
+        logger.warning(message)
+        return {"promoted": False, "reason": "metric_below_threshold", "f1": best_f1}
+
+    client = mlflow.tracking.MlflowClient()
+    candidates = []
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+        candidates = [version for version in versions if version.run_id == best_run_id]
+        if candidates:
+            ready = [
+                version
+                for version in candidates
+                if getattr(version, "status", "READY") == "READY"
+            ]
+            if ready:
+                candidates = ready
+                break
+        time.sleep(3)
+
+    if not candidates:
+        message = (
+            f"Could not find a registered MLflow model version for "
+            f"{MODEL_NAME} run_id={best_run_id}"
+        )
+        if require_promotion:
+            raise RuntimeError(message)
+        logger.warning(message)
+        return {"promoted": False, "reason": "model_version_not_found"}
+
+    version = max(candidates, key=lambda item: int(item.version))
+    logger.info(
+        f"Promoting {MODEL_NAME} version {version.version} "
+        f"from run {best_run_id} to stage {stage}"
+    )
+    client.transition_model_version_stage(
+        name=MODEL_NAME,
+        version=version.version,
+        stage=stage,
+        archive_existing_versions=True,
+    )
+    client.set_model_version_tag(MODEL_NAME, version.version, "best_model", best_name)
+    client.set_model_version_tag(
+        MODEL_NAME,
+        version.version,
+        "val_f1_weighted",
+        f"{best_f1:.4f}",
+    )
+    return {
+        "promoted": True,
+        "model_name": MODEL_NAME,
+        "version": version.version,
+        "stage": stage,
+        "run_id": best_run_id,
+        "f1": best_f1,
+    }
+
+
 def upload_artifacts_to_s3(model_dir: str, artifact_s3_uri: str) -> list[str]:
     """Upload serving artifacts to S3 so CI/CD and runtime sync can consume them."""
     import boto3
@@ -447,6 +526,23 @@ def main() -> None:
         default=os.getenv("MODEL_ARTIFACT_S3_URI", ""),
         help="Optional s3://bucket/prefix where exported serving artifacts are uploaded.",
     )
+    parser.add_argument(
+        "--promote-stage",
+        default=os.getenv("MODEL_PROMOTE_STAGE", ""),
+        help="Optional MLflow Model Registry stage to promote the best model to.",
+    )
+    parser.add_argument(
+        "--promote-threshold",
+        type=float,
+        default=float(os.getenv("MODEL_PROMOTE_THRESHOLD", "0.0")),
+        help="Minimum weighted F1 required before MLflow promotion.",
+    )
+    parser.add_argument(
+        "--require-promotion",
+        action="store_true",
+        default=os.getenv("MODEL_REQUIRE_PROMOTION", "false").lower() == "true",
+        help="Fail the run when promotion is requested but cannot be completed.",
+    )
     for label in DISEASE_FILES:
         parser.add_argument(
             f"--max-{label}",
@@ -496,6 +592,15 @@ def main() -> None:
     export_artifacts(args.model_dir, best_name, results, label_encoder, device)
     if args.artifact_s3_uri:
         upload_artifacts_to_s3(args.model_dir, args.artifact_s3_uri)
+    if args.promote_stage:
+        promotion = promote_best_model(
+            best_name=best_name,
+            results=results,
+            stage=args.promote_stage,
+            threshold=args.promote_threshold,
+            require_promotion=args.require_promotion,
+        )
+        logger.info(f"Promotion result: {promotion}")
 
     logger.info("Training complete.")
     logger.info(f"Artifacts written to {Path(args.model_dir).resolve()}")

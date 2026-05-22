@@ -1,0 +1,72 @@
+name: MLflow Server - Build and Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mlflow.yml"
+      - "docker/Dockerfile.mlflow"
+      - "scripts/ensure_mlflow_server.sh"
+      - "scripts/ensure_aws_alb.sh"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Optional reason for deploying MLflow"
+        required: false
+        default: "Manual MLflow deploy"
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: sleep-portal
+  ECS_CLUSTER: sleep-portal-cluster
+  ECS_SERVICE: sleep-portal-service
+  APP_ECS_SERVICE: sleep-portal-service
+  MLFLOW_ECS_SERVICE: sleep-portal-mlflow-service
+  MLFLOW_CONTAINER_PORT: "5000"
+  MLFLOW_ARTIFACTS_DESTINATION: s3://sleep-mlops-651709/mlflow-artifacts
+
+jobs:
+  build-and-deploy-mlflow:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push MLflow image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: mlflow-${{ github.sha }}
+        run: |
+          docker build -f docker/Dockerfile.mlflow \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:mlflow-latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:mlflow-latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure web ALB exists
+        run: bash scripts/ensure_aws_alb.sh
+
+      - name: Deploy MLflow server to ECS
+        env:
+          MLFLOW_IMAGE_URI: ${{ steps.build-image.outputs.image }}
+        run: bash scripts/ensure_mlflow_server.sh
+
+      - name: Smoke test MLflow server
+        run: |
+          : "${MLFLOW_URL:?MLFLOW_URL was not set by ensure_mlflow_server.sh}"
+          echo "MLflow URL: $MLFLOW_URL"
+          curl --fail --retry 18 --retry-delay 10 --retry-all-errors --max-time 20 "$MLFLOW_URL/"

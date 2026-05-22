@@ -1,7 +1,7 @@
 # ── Security group: ALB ──────────────────────────────────────────────────────
 resource "aws_security_group" "alb" {
   name        = "${var.project}-alb-sg"
-  description = "Allow HTTP/HTTPS inbound to ALB"
+  description = "Allow HTTP/HTTPS and MLflow inbound to ALB"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -16,6 +16,14 @@ resource "aws_security_group" "alb" {
     description = "HTTPS from anywhere"
     from_port   = 443
     to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "MLflow UI/API from anywhere"
+    from_port   = var.mlflow_port
+    to_port     = var.mlflow_port
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -40,6 +48,14 @@ resource "aws_security_group" "ecs" {
     description     = "App traffic from ALB"
     from_port       = var.container_port
     to_port         = var.container_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    description     = "MLflow traffic from ALB"
+    from_port       = var.mlflow_port
+    to_port         = var.mlflow_port
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }

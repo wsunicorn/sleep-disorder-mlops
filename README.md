@@ -16,6 +16,8 @@ README này đóng vai trò như tài liệu tổng hợp cho project: vừa là
 - Hạ tầng deploy: Docker -> ECR -> ECS Fargate -> Application Load Balancer.
 - CI/CD: GitHub Actions tự test, build, push image, deploy ECS, chạy migrate và smoke test.
 - URL web app hiện tại: `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com`.
+- MLflow production: `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`.
+- Model Registry stage phục vụ: `Production`, có fallback tải artifact từ S3 khi registry tạm thời không sẵn sàng.
 
 ## Mục lục
 
@@ -23,6 +25,7 @@ README này đóng vai trò như tài liệu tổng hợp cho project: vừa là
 - [CHƯƠNG 2. HIỆN THỰC](#chương-2-hiện-thực)
 - [CHƯƠNG 3. KẾT LUẬN](#chương-3-kết-luận)
 - [Hướng dẫn chạy và vận hành](#hướng-dẫn-chạy-và-vận-hành)
+- [Kịch bản demo toàn bộ project](#kịch-bản-demo-toàn-bộ-project)
 - [Tài liệu tham khảo](#tài-liệu-tham-khảo)
 
 ---
@@ -735,11 +738,13 @@ File chính:
 
 - `.github/workflows/monitoring.yml`
 - `.github/workflows/retrain.yml`
+- `.github/workflows/mlflow.yml`
 - `monitoring/drift_detection.py`
 - `monitoring/feature_store.py`
 - `monitoring/retrain_flow.py`
 - `monitoring/promote_rules.py`
 - `scripts/export_reference_features.py`
+- `scripts/ensure_mlflow_server.sh`
 - `training/train.py`
 
 Kết quả:
@@ -750,15 +755,16 @@ Kết quả:
 - `monitoring/drift_detection.py` đọc được một file Parquet, một thư mục local, một object S3 hoặc một S3 prefix gồm nhiều file Parquet.
 - Drift detection dùng Evidently AI để tạo HTML report và file `drift_summary_latest.json` [30].
 - Nếu `alert=true`, workflow monitoring tự gọi workflow retrain.
-- Retrain workflow chạy `training/train.py` ngay trên GitHub Actions, ghép dữ liệu nền với dữ liệu mới bằng `--extra-data`, log MLflow, upload artifact model lên S3, rồi kích hoạt lại CI/CD deploy.
+- Retrain workflow chạy `training/train.py` ngay trên GitHub Actions, ghép dữ liệu nền với dữ liệu mới bằng `--extra-data`, log run vào MLflow Tracking Server production, đăng ký model vào MLflow Model Registry, promote model tốt nhất lên stage `Production` nếu weighted F1 vượt ngưỡng, upload artifact model lên S3, rồi kích hoạt lại CI/CD deploy.
+- Workflow `mlflow.yml` build Docker image riêng cho MLflow, deploy thành ECS service riêng, dùng RDS PostgreSQL làm backend store và S3 làm artifact store.
 - CI/CD build image mới bằng artifact vừa upload, push ECR và deploy ECS Fargate.
 - Ứng dụng cũng có cấu hình `MODEL_ARTIFACT_S3_URI` để đồng bộ model artifact mới khi container khởi động.
 
 Ý nghĩa:
 
-- Vòng lặp MLOps hiện đã nối thành chuỗi: dữ liệu mới -> feature store -> drift report -> retrain -> upload model artifact -> CI/CD deploy -> smoke test.
-- MLflow có thể xem local qua Docker Compose hoặc ghi vào một tracking server persistent nếu đặt `MLFLOW_TRACKING_URI`.
-- GitHub Actions là nơi quan sát đầy đủ log retrain/deploy; CloudWatch là nơi xem log runtime của ECS.
+- Vòng lặp MLOps hiện đã nối thành chuỗi: dữ liệu mới -> feature store -> drift report -> retrain -> MLflow Registry -> upload model artifact -> CI/CD deploy -> smoke test.
+- MLflow production hiện có thể xem tại `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`; đây là nơi quan sát experiment, run, metric, artifact và stage `Production`.
+- GitHub Actions là nơi quan sát log retrain/deploy; MLflow là nơi quan sát lịch sử huấn luyện/model registry; CloudWatch là nơi xem log runtime của ECS.
 
 ### 2.2.8. Chức năng hạ tầng AWS
 
@@ -769,6 +775,7 @@ Thành phần chính:
 | ECR | Lưu Docker image | Tích hợp trực tiếp với ECS |
 | ECS Fargate | Chạy container Django | Không cần quản lý EC2 server, trả phí theo workload [26] |
 | ALB | Public endpoint và health check | Phân phối traffic, kiểm tra target health [28] |
+| MLflow Tracking Server | Lưu experiment, metric, artifact và Model Registry | Cần lịch sử huấn luyện/model version bền vững thay vì `mlruns` cục bộ [17] |
 | S3 | Lưu model artifact/dữ liệu | Object storage phù hợp artifact lớn [29] |
 | PostgreSQL/RDS | Lưu bệnh nhân và prediction | Dữ liệu quan hệ rõ ràng |
 | Redis | Cache inference | Giảm chi phí tính toán lặp lại |
@@ -842,7 +849,7 @@ Hạn chế hiện tại:
 - API hiện chủ yếu trả nhãn, chưa trả xác suất đầy đủ cho từng lớp.
 - Chưa có calibration, uncertainty estimation hoặc giải thích dự đoán.
 - Vòng retrain hiện dùng nhãn/pseudo-label từ dữ liệu ingest nếu chưa có nhãn bác sĩ xác nhận, nên cần quy trình kiểm duyệt dữ liệu trước khi dùng thật.
-- MLflow production cần một tracking server persistent riêng nếu muốn xem lịch sử run lâu dài ngoài GitHub artifact.
+- MLflow production đã được tách thành ECS service riêng, nhưng hiện vẫn đang public qua ALB port `5000`; nếu dùng lâu dài nên thêm xác thực, HTTPS/domain riêng hoặc giới hạn IP.
 - Terraform và script AWS CLI đang cùng tồn tại; về lâu dài nên đưa toàn bộ hạ tầng về Terraform state để tránh lệch trạng thái.
 - Giao diện và thông điệp cảnh báo y tế cần được làm rõ hơn nếu demo cho người không chuyên.
 
@@ -889,7 +896,7 @@ Hạn chế hiện tại:
 4. Thêm rollback image khi smoke test fail.
 5. Lưu metric production: latency, error rate, class distribution, drift score.
 6. Kết nối CloudWatch alarm hoặc notification khi service unhealthy.
-7. Triển khai MLflow Tracking Server persistent trên ECS/EC2 với backend RDS và artifact root S3.
+7. Bảo vệ MLflow Tracking Server bằng HTTPS, domain riêng, xác thực hoặc giới hạn IP/VPN trước khi mở cho người dùng ngoài nhóm.
 8. Thêm bước human approval trước khi promote model nếu dữ liệu mới chưa có nhãn xác nhận.
 
 ---
@@ -960,12 +967,15 @@ Workflow `.github/workflows/ci.yml` sẽ tự:
 7. Chạy migrate.
 8. Smoke test endpoint.
 
+MLflow server dùng workflow riêng `.github/workflows/mlflow.yml`. Khi cần bật lại đầy đủ hệ thống production, chạy `mlflow.yml` trước hoặc song song với `ci.yml`.
+
 ## Bật lại web app sau khi tắt để tiết kiệm chi phí
 
 Nếu chỉ scale ECS service về 0 hoặc xóa ALB, workflow hiện tại có thể bật lại khi push:
 
 - ECS service được update về `desired-count 1`.
 - `scripts/ensure_aws_alb.sh` tìm hoặc tạo lại ALB, target group, listener.
+- `scripts/ensure_mlflow_server.sh` tìm hoặc tạo lại target group/listener port `5000` và ECS service `sleep-portal-mlflow-service`.
 - Nếu listener đã đúng target group, script bỏ qua `ModifyListener` để tránh lỗi IAM không cần thiết.
 
 Nếu đã xóa sâu hơn, ví dụ VPC, ECS service, RDS, security group hoặc IAM role, cần khôi phục bằng Terraform hoặc tạo lại resource trước khi deploy app.
@@ -995,7 +1005,11 @@ DRIFT_REFERENCE_DATA=s3://sleep-mlops-651709/features/reference/features.parquet
 DRIFT_CURRENT_DATA=s3://sleep-mlops-651709/monitoring/current
 RETRAIN_TRAINING_DATA=s3://sleep-mlops-651709/features/reference/features.parquet
 MODEL_ARTIFACT_S3_URI=s3://sleep-mlops-651709/models
-MLFLOW_TRACKING_URI=<mlflow-tracking-server-hoac-mlruns>
+MLFLOW_TRACKING_URI=http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000
+MLFLOW_MODEL_NAME=sleep-disorder-classifier
+MODEL_PROMOTE_STAGE=Production
+MODEL_PROMOTE_THRESHOLD=0.55
+MODEL_REQUIRE_PROMOTION=true
 DRIFT_THRESHOLD=0.3
 ```
 
@@ -1005,9 +1019,9 @@ Luồng tự động:
 2. API lưu bệnh nhân/prediction vào database và ghi feature batch ra `MLOPS_FEATURE_STORE_S3_URI`.
 3. `monitoring.yml` đọc `DRIFT_REFERENCE_DATA` và `DRIFT_CURRENT_DATA`, sinh report Evidently.
 4. Nếu drift vượt `DRIFT_THRESHOLD`, workflow tự gọi `retrain.yml`.
-5. `retrain.yml` chạy `training/train.py --extra-data <current_data> --artifact-s3-uri <MODEL_ARTIFACT_S3_URI>`.
-6. Model mới, label encoder, feature schema và metadata được upload lên S3.
-7. Workflow retrain gọi lại `ci.yml` để build image mới, deploy ECS và smoke test.
+5. `retrain.yml` chạy `training/train.py --extra-data <current_data> --artifact-s3-uri <MODEL_ARTIFACT_S3_URI> --promote-stage Production`.
+6. Model mới được log vào MLflow, đăng ký vào Registry, promote lên `Production` nếu vượt `MODEL_PROMOTE_THRESHOLD`, đồng thời label encoder, feature schema và metadata được upload lên S3.
+7. Workflow retrain gọi lại `ci.yml` để build image mới, deploy ECS, migrate database và smoke test.
 
 Tạo reference feature ban đầu từ dữ liệu CAP:
 
@@ -1018,7 +1032,19 @@ python scripts/export_reference_features.py `
   --s3-uri s3://sleep-mlops-651709/features/reference/features.parquet
 ```
 
-Chạy MLflow UI local:
+Triển khai MLflow production trên ECS:
+
+```powershell
+gh workflow run mlflow.yml --ref main -f reason="Deploy production MLflow"
+```
+
+Sau khi workflow xong, mở:
+
+```text
+http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000
+```
+
+Chạy MLflow UI local khi phát triển offline:
 
 ```powershell
 docker compose -f docker/docker-compose.local.yml up db mlflow
@@ -1030,7 +1056,115 @@ Sau đó mở:
 http://localhost:5000
 ```
 
-Khi có tracking server thật, đặt `MLFLOW_TRACKING_URI` trong GitHub Variables và môi trường production để mọi lần train/retrain ghi vào cùng một nơi.
+Trong production, `MLFLOW_TRACKING_URI` phải trỏ về MLflow ECS service ở trên để mọi lần train/retrain ghi vào cùng một nơi. CI/CD cũng truyền URI này vào ECS task definition của web app để serving ưu tiên load model từ Registry stage `Production`, sau đó mới fallback sang artifact S3.
+
+---
+
+# Kịch bản demo toàn bộ project
+
+Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLOps: dữ liệu cảm biến/EEG -> trích xuất feature -> dự đoán -> lưu bệnh nhân -> ghi feature mới -> phát hiện drift -> retrain -> MLflow Registry -> CI/CD redeploy -> web app dùng model mới.
+
+## Chuẩn bị trước khi demo
+
+1. Mở GitHub repository và kiểm tra Secrets:
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
+2. Kiểm tra GitHub Repository Variables:
+   - `DRIFT_REFERENCE_DATA=s3://sleep-mlops-651709/features/reference/features.parquet`
+   - `DRIFT_CURRENT_DATA=s3://sleep-mlops-651709/monitoring/current`
+   - `RETRAIN_TRAINING_DATA=s3://sleep-mlops-651709/features/reference/features.parquet`
+   - `MODEL_ARTIFACT_S3_URI=s3://sleep-mlops-651709/models`
+   - `MLFLOW_TRACKING_URI=http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`
+   - `MODEL_PROMOTE_STAGE=Production`
+   - `MODEL_PROMOTE_THRESHOLD=0.55`
+3. Bật lại các service nếu trước đó đã tắt để tiết kiệm chi phí:
+   ```powershell
+   gh workflow run mlflow.yml --ref main -f reason="Demo MLflow production"
+   gh workflow run ci.yml --ref main -f reason="Demo web app production"
+   ```
+4. Đợi hai workflow xanh, sau đó kiểm tra:
+   ```powershell
+   curl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/health/
+   curl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/model-info/
+   curl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000/
+   ```
+
+## Luồng trình bày đề xuất
+
+1. Giới thiệu bài toán:
+   - Dữ liệu đến từ CAP Sleep/Balanced CAP.
+   - Tín hiệu EEG được chia cửa sổ 2 giây.
+   - Mỗi cửa sổ được biến thành 24 đặc trưng.
+   - Mô hình phân loại 7 nhóm: `healthy`, `insomnia`, `narcolepsy`, `nfle`, `plm`, `rbd`, `sdb`.
+
+2. Mở web app:
+   - Truy cập `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com`.
+   - Vào dashboard tổng quan để xem số bệnh nhân, số epoch đã lưu và phân bố nhãn.
+   - Vào trang Pipeline để chỉ ra model name, stage `Production`, tracking URI, artifact S3 và feature store S3.
+
+3. Kiểm tra API serving:
+   - Mở `/api/v1/health/` để chứng minh service sống.
+   - Mở `/api/v1/model-info/` để chứng minh model đã sẵn sàng, có 24 feature, có artifact sync S3 và có MLflow stage.
+
+4. Demo dự đoán bằng feature:
+   - Vào trang Predict trên giao diện, nhập hoặc dán một batch 24 feature.
+   - Hoặc gọi API:
+     ```powershell
+     curl -X POST `
+       http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/predict/ `
+       -H "Content-Type: application/json" `
+       -d "{\"features\":[[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4]]}"
+     ```
+   - Giải thích rằng production serving sẽ ưu tiên MLflow Registry, nếu lỗi sẽ fallback `model.pkl` từ S3.
+
+5. Demo luồng IoT nhiều bệnh nhân:
+   ```powershell
+   python iot_simulation/multi_patient_demo.py `
+     --url http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
+     --epochs 20 `
+     --batch-size 5 `
+     --workers 3
+   ```
+   - Script lấy thống kê feature, sinh epoch mô phỏng, gọi `/predict/`, rồi gửi kết quả vào `/ingest/`.
+   - `/ingest/` lưu bệnh nhân và epoch vào PostgreSQL, đồng thời ghi feature batch ra `s3://sleep-mlops-651709/monitoring/current`.
+
+6. Quay lại dashboard:
+   - Mở danh sách bệnh nhân.
+   - Chọn một bệnh nhân, xem timeline epoch và phân bố dự đoán.
+   - Đây là phần chứng minh dữ liệu mới đã đi vào hệ thống thật.
+
+7. Mở MLflow production:
+   - Truy cập `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`.
+   - Chọn experiment `sleep-disorder-kaggle`.
+   - Chỉ ra các run train/retrain, metric `val_f1_weighted`, `val_accuracy`, artifact và model `sleep-disorder-classifier`.
+   - Vào Model Registry để xem version đang ở stage `Production`.
+
+8. Demo monitoring drift:
+   - Vào GitHub Actions -> `Monitoring - Drift Check` -> Run workflow.
+   - Nhập:
+     - `reference_data`: `s3://sleep-mlops-651709/features/reference/features.parquet`
+     - `current_data`: `s3://sleep-mlops-651709/monitoring/current`
+   - Sau khi chạy, mở artifact `drift-reports` để xem HTML report và `drift_summary_latest.json`.
+   - Nếu `alert=true`, workflow tự gọi `retrain.yml`.
+
+9. Demo retrain và promote:
+   - Nếu muốn chủ động, chạy GitHub Actions -> `Retrain - Promote - Redeploy` -> Run workflow.
+   - Dùng:
+     - `training_data`: `s3://sleep-mlops-651709/features/reference/features.parquet`
+     - `extra_data`: `s3://sleep-mlops-651709/monitoring/current`
+     - `artifact_s3_uri`: `s3://sleep-mlops-651709/models`
+     - `model_type`: `all`
+     - `deploy_after_success`: `true`
+   - Workflow sẽ train XGBoost/LightGBM/RandomForest, chọn weighted F1 tốt nhất, promote lên `Production` nếu vượt ngưỡng, upload artifact S3 và gọi lại `ci.yml`.
+
+10. Demo CI/CD redeploy:
+    - Mở workflow `CI/CD - Build, Test, Deploy`.
+    - Chỉ ra các bước: test -> build Docker -> push ECR -> ensure ALB -> register ECS task definition -> deploy -> migrate -> smoke test.
+    - Sau khi xanh, mở lại `/api/v1/model-info/` để xác nhận app đang chạy task mới và vẫn ready.
+
+## Lời thoại ngắn khi demo
+
+“Project này không chỉ train model trong notebook. Notebook Kaggle là quy chuẩn feature và mô hình; phần production biến nó thành hệ thống MLOps: web app nhận EEG/feature, model phục vụ qua API, dữ liệu mới được lưu vào feature store, drift được kiểm tra định kỳ, retrain được kích hoạt khi cần, MLflow lưu toàn bộ lịch sử huấn luyện và Model Registry quyết định version `Production`, còn GitHub Actions tự build/deploy lại ECS. Vì metric hiện mới khoảng 0.59 weighted F1, hệ thống phù hợp để demo kỹ thuật và quy trình MLOps, chưa được dùng như công cụ chẩn đoán y khoa.”
 
 ---
 

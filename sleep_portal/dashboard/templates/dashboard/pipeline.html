@@ -72,7 +72,7 @@
     </div>
   </div>
   <div class="row g-3">
-    <div class="col-md-4">
+    <div class="col-md-3">
       <div class="ops-card">
         <div class="d-flex justify-content-between align-items-start mb-1">
           <span class="ops-label">CI pipeline</span>
@@ -84,7 +84,7 @@
         <p>Test → Build Docker → Push ECR → Deploy ECS + migrate mỗi lần push lên main.</p>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       <div class="ops-card">
         <div class="d-flex justify-content-between align-items-start mb-1">
           <span class="ops-label">Phát hiện drift</span>
@@ -96,7 +96,7 @@
         <p>Kiểm tra drift hàng tuần (Thứ 2 lúc 03:00 UTC) qua Evidently AI. Cũng có thể kích hoạt thủ công.</p>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       <div class="ops-card">
         <div class="d-flex justify-content-between align-items-start mb-1">
           <span class="ops-label">Tái huấn luyện</span>
@@ -105,7 +105,19 @@
           </span>
         </div>
         <strong>retrain.yml</strong>
-        <p>Kích hoạt thủ công để tái huấn luyện trên SageMaker. Quy tắc promote áp dụng khi F1 ≥ ngưỡng.</p>
+        <p>Train lại trên GitHub Actions, log vào MLflow, promote model khi F1 vượt ngưỡng rồi kích hoạt CI/CD redeploy.</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card">
+        <div class="d-flex justify-content-between align-items-start mb-1">
+          <span class="ops-label">MLflow server</span>
+          <span class="chip {% if mlflow_ready %}chip-success{% else %}chip-danger{% endif %}">
+            {% if mlflow_ready %}Sẵn sàng{% else %}Thiếu{% endif %}
+          </span>
+        </div>
+        <strong>mlflow.yml</strong>
+        <p>Build image MLflow, deploy service riêng trên ECS, dùng RDS làm backend và S3 làm artifact store.</p>
       </div>
     </div>
   </div>

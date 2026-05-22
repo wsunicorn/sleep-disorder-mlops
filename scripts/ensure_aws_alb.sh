@@ -194,7 +194,7 @@ if not_found "$ALB_SG_ID"; then
   echo "Creating ALB security group: $ALB_SG_NAME"
   ALB_SG_ID=$(aws ec2 create-security-group \
     --group-name "$ALB_SG_NAME" \
-    --description "Allow HTTP/HTTPS inbound to ALB" \
+    --description "Allow HTTP/HTTPS and MLflow inbound to ALB" \
     --vpc-id "$VPC_ID" \
     --query "GroupId" \
     --output text)

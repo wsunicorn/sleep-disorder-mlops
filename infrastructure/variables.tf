@@ -42,6 +42,12 @@ variable "container_port" {
   default     = 8000
 }
 
+variable "mlflow_port" {
+  description = "Port the MLflow tracking server listens on"
+  type        = number
+  default     = 5000
+}
+
 variable "task_cpu" {
   description = "Fargate task CPU units (256 = 0.25 vCPU)"
   type        = string
@@ -64,6 +70,36 @@ variable "ecr_image_tag" {
   description = "Docker image tag to deploy"
   type        = string
   default     = "latest"
+}
+
+variable "mlflow_image_tag" {
+  description = "Docker image tag for the MLflow server image"
+  type        = string
+  default     = "mlflow-latest"
+}
+
+variable "mlflow_task_cpu" {
+  description = "Fargate CPU units for the MLflow task"
+  type        = string
+  default     = "512"
+}
+
+variable "mlflow_task_memory" {
+  description = "Fargate memory in MB for the MLflow task"
+  type        = string
+  default     = "1024"
+}
+
+variable "mlflow_desired_count" {
+  description = "Number of MLflow task replicas"
+  type        = number
+  default     = 1
+}
+
+variable "mlflow_artifacts_destination" {
+  description = "S3 prefix used by the MLflow tracking server for proxied artifacts"
+  type        = string
+  default     = "s3://sleep-mlops-651709/mlflow-artifacts"
 }
 
 # ── RDS ───────────────────────────────────────────────────────────────────────

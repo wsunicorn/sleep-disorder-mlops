@@ -36,9 +36,12 @@ env:
   AWS_REGION: ap-southeast-1
   DEFAULT_TRAINING_DATA: ${{ vars.RETRAIN_TRAINING_DATA || 's3://sleep-mlops-651709/features/reference/features.parquet' }}
   DEFAULT_ARTIFACT_S3_URI: ${{ vars.MODEL_ARTIFACT_S3_URI || 's3://sleep-mlops-651709/models' }}
-  MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || 'mlruns' }}
+  MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || '' }}
   MLFLOW_EXPERIMENT: ${{ vars.MLFLOW_EXPERIMENT || 'sleep-disorder-kaggle' }}
   MLFLOW_MODEL_NAME: ${{ vars.MLFLOW_MODEL_NAME || 'sleep-disorder-classifier' }}
+  MODEL_PROMOTE_STAGE: ${{ vars.MODEL_PROMOTE_STAGE || 'Production' }}
+  MODEL_PROMOTE_THRESHOLD: ${{ vars.MODEL_PROMOTE_THRESHOLD || '0.55' }}
+  MODEL_REQUIRE_PROMOTION: ${{ vars.MODEL_REQUIRE_PROMOTION || 'true' }}
 
 jobs:
   retrain:
@@ -53,6 +56,20 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve MLflow tracking URI
+        shell: bash
+        run: |
+          TRACKING_URI="$MLFLOW_TRACKING_URI"
+          if [ -z "$TRACKING_URI" ]; then
+            ALB_DNS=$(aws elbv2 describe-load-balancers \
+              --names sleep-portal-alb \
+              --query "LoadBalancers[0].DNSName" \
+              --output text)
+            TRACKING_URI="http://$ALB_DNS:5000"
+          fi
+          echo "MLFLOW_TRACKING_URI=$TRACKING_URI" >> "$GITHUB_ENV"
+          echo "Using MLflow tracking URI: $TRACKING_URI"
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -99,6 +116,10 @@ jobs:
           if [ -n "${{ inputs.extra_data }}" ]; then
             EXTRA_ARGS+=(--extra-data "${{ inputs.extra_data }}")
           fi
+          PROMOTION_ARGS=(--promote-stage "$MODEL_PROMOTE_STAGE" --promote-threshold "$MODEL_PROMOTE_THRESHOLD")
+          if [ "$MODEL_REQUIRE_PROMOTION" = "true" ]; then
+            PROMOTION_ARGS+=(--require-promotion)
+          fi
 
           python training/train.py \
             --retrain \
@@ -106,6 +127,7 @@ jobs:
             --model-dir models \
             --model-type "${{ steps.retrain-inputs.outputs.model_type }}" \
             --artifact-s3-uri "${{ steps.retrain-inputs.outputs.artifact_s3_uri }}" \
+            "${PROMOTION_ARGS[@]}" \
             "${EXTRA_ARGS[@]}"
 
       - name: Upload retrain artifacts

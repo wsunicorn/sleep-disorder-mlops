@@ -21,6 +21,9 @@ env:
   MODEL_ARTIFACT_LOCAL_DIR: /app/models
   MLOPS_FEATURE_STORE_S3_URI: s3://sleep-mlops-651709/monitoring/current
   MLOPS_FEATURE_STORE_LOCAL_DIR: /tmp/sleep-portal/monitoring/current
+  MLFLOW_PORT: "5000"
+  MLFLOW_MODEL_NAME: sleep-disorder-classifier
+  MLFLOW_MODEL_STAGE: Production
 
 jobs:
   # ─── Job 1: Unit Tests ──────────────────────────────────────
@@ -155,6 +158,9 @@ jobs:
             --arg MODEL_ARTIFACT_LOCAL_DIR "$MODEL_ARTIFACT_LOCAL_DIR" \
             --arg MLOPS_FEATURE_STORE_S3_URI "$MLOPS_FEATURE_STORE_S3_URI" \
             --arg MLOPS_FEATURE_STORE_LOCAL_DIR "$MLOPS_FEATURE_STORE_LOCAL_DIR" \
+            --arg MLFLOW_TRACKING_URI "$APP_URL:$MLFLOW_PORT" \
+            --arg MLFLOW_MODEL_NAME "$MLFLOW_MODEL_NAME" \
+            --arg MLFLOW_MODEL_STAGE "$MLFLOW_MODEL_STAGE" \
             '
             def upsert_env($name; $value):
               .environment = ((.environment // []) | map(select(.name != $name)) + [{"name": $name, "value": $value}]);
@@ -166,6 +172,9 @@ jobs:
                 | upsert_env("MODEL_ARTIFACT_LOCAL_DIR"; $MODEL_ARTIFACT_LOCAL_DIR)
                 | upsert_env("MLOPS_FEATURE_STORE_S3_URI"; $MLOPS_FEATURE_STORE_S3_URI)
                 | upsert_env("MLOPS_FEATURE_STORE_LOCAL_DIR"; $MLOPS_FEATURE_STORE_LOCAL_DIR)
+                | upsert_env("MLFLOW_TRACKING_URI"; $MLFLOW_TRACKING_URI)
+                | upsert_env("MLFLOW_MODEL_NAME"; $MLFLOW_MODEL_NAME)
+                | upsert_env("MLFLOW_MODEL_STAGE"; $MLFLOW_MODEL_STAGE)
               else
                 .
               end

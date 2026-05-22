@@ -25,6 +25,11 @@ output "app_url" {
   value       = "http://${aws_lb.main.dns_name}"
 }
 
+output "mlflow_url" {
+  description = "Base URL of the MLflow tracking server"
+  value       = "http://${aws_lb.main.dns_name}:${var.mlflow_port}"
+}
+
 # ── ECR ───────────────────────────────────────────────────────────────────────
 output "ecr_repository_url" {
   description = "ECR repository URL (use as Docker registry)"
@@ -40,6 +45,11 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   description = "Name of the ECS service"
   value       = aws_ecs_service.app.name
+}
+
+output "mlflow_ecs_service_name" {
+  description = "Name of the MLflow ECS service"
+  value       = aws_ecs_service.mlflow.name
 }
 
 # ── RDS ───────────────────────────────────────────────────────────────────────

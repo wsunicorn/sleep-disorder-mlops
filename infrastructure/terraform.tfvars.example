@@ -17,6 +17,13 @@ task_memory   = "1024"
 desired_count = 1
 ecr_image_tag = "latest"
 
+mlflow_port                  = 5000
+mlflow_image_tag             = "mlflow-latest"
+mlflow_task_cpu              = "512"
+mlflow_task_memory           = "1024"
+mlflow_desired_count         = 1
+mlflow_artifacts_destination = "s3://sleep-mlops-651709/mlflow-artifacts"
+
 # RDS
 db_instance_class    = "db.t3.micro"
 db_allocated_storage = 20
