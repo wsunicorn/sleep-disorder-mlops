@@ -80,6 +80,18 @@ def load_parquet_from_s3_or_local(path: str) -> pd.DataFrame:
     return _load_local_parquet(path)
 
 
+def _write_summary(output_dir: str | Path, summary: dict) -> Path:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_path = output_dir / f"drift_summary_{timestamp}.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    latest_summary_path = output_dir / "drift_summary_latest.json"
+    latest_summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    logger.info(f"Summary saved: {summary_path}")
+    return summary_path
+
+
 def run_drift_detection(
     reference_path: str,
     current_path: str,
@@ -94,7 +106,49 @@ def run_drift_detection(
     reference_df = load_parquet_from_s3_or_local(reference_path)
 
     logger.info(f"Loading current data: {current_path}")
-    current_df = load_parquet_from_s3_or_local(current_path)
+    try:
+        current_df = load_parquet_from_s3_or_local(current_path)
+    except FileNotFoundError as exc:
+        logger.warning(f"No current data found; skipping drift check: {exc}")
+        summary = {
+            "drift_detected": False,
+            "drift_share": 0.0,
+            "report_path": None,
+            "n_reference": int(len(reference_df)),
+            "n_current": 0,
+            "n_features": 0,
+            "threshold": float(threshold),
+            "alert": False,
+            "skipped": True,
+            "skip_reason": "no_current_data",
+            "message": (
+                "No current parquet files were found. Ingest new feature batches "
+                "through /api/v1/ingest/ before expecting drift or retrain."
+            ),
+        }
+        _write_summary(output_dir, summary)
+        return summary
+
+    if current_df.empty:
+        logger.warning("Current data is empty; skipping drift check.")
+        summary = {
+            "drift_detected": False,
+            "drift_share": 0.0,
+            "report_path": None,
+            "n_reference": int(len(reference_df)),
+            "n_current": 0,
+            "n_features": 0,
+            "threshold": float(threshold),
+            "alert": False,
+            "skipped": True,
+            "skip_reason": "empty_current_data",
+            "message": (
+                "Current feature data is empty. Ingest feature batches before "
+                "expecting drift or retrain."
+            ),
+        }
+        _write_summary(output_dir, summary)
+        return summary
 
     # Chỉ lấy feature columns (bỏ metadata)
     meta_cols = [
@@ -158,11 +212,7 @@ def run_drift_detection(
         "alert": bool(drift_share > threshold),
     }
 
-    summary_path = output_dir / f"drift_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    latest_summary_path = output_dir / "drift_summary_latest.json"
-    latest_summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    logger.info(f"Summary saved: {summary_path}")
+    _write_summary(output_dir, summary)
 
     return summary
 
