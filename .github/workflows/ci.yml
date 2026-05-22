@@ -115,6 +115,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -122,12 +124,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Ensure public ALB
+        run: bash scripts/ensure_aws_alb.sh
+
       - name: Deploy to ECS
         run: |
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
             --desired-count 1 \
+            --load-balancers "targetGroupArn=$TG_ARN,containerName=sleep-portal,containerPort=8000" \
             --force-new-deployment \
             --query 'service.deployments[0].status' \
             --output text
@@ -175,11 +181,7 @@ jobs:
 
       - name: Smoke test deployed service
         run: |
-          ALB_DNS=$(aws elbv2 describe-load-balancers \
-            --names sleep-portal-alb \
-            --query "LoadBalancers[0].DNSName" \
-            --output text)
-          APP_URL="http://$ALB_DNS"
+          : "${APP_URL:?APP_URL was not set by ensure_aws_alb.sh}"
           echo "App URL: $APP_URL"
           curl --fail --retry 12 --retry-delay 10 --retry-all-errors --max-time 20 \
             "$APP_URL/api/v1/health/"

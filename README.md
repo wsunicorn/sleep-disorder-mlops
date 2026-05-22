@@ -161,13 +161,15 @@ Workflow da duoc chinh de:
   tam tat task de tiet kiem chi phi;
 - lay subnet/security group cua migration task tu ECS service thay vi hard-code
   ID cu.
-- tu query ALB `sleep-portal-alb`, in ra URL that va smoke test `/api/v1/health/`
-  cung `/api/v1/model-info/` sau deploy.
+- tu tao lai ALB `sleep-portal-alb`, target group va HTTP listener neu chung da
+  bi xoa de tiet kiem chi phi;
+- in ra URL ALB moi va smoke test `/api/v1/health/` cung `/api/v1/model-info/`
+  sau deploy.
 
-Luu y quan trong: neu chi scale ECS service ve 0 thi CI/CD co the bat lai bang
-`desired-count 1`. Neu da xoa ALB/target group/service hoac resource ha tang
-khac, workflow deploy khong tu tao lai duoc. Luc do can chay Terraform voi state
-dung, hoac import lai resource vao state truoc khi apply.
+Luu y quan trong: workflow co the phuc hoi ALB/target group/listener neu VPC,
+public subnet, ECS service va security group nen van con. Neu xoa ca network,
+ECS service, RDS hoac cac resource nen khac, can chay Terraform voi state dung,
+hoac import resource vao state truoc khi apply.
 
 ## Danh gia do phu hop voi de tai
 
@@ -213,6 +215,8 @@ Nhung project chua that su "tot" neu danh gia nghiem tuc:
 
 1. Dua Terraform backend S3/DynamoDB vao dung that de tranh mat state.
 2. Tao workflow rieng cho infrastructure, chay manual `terraform plan/apply`.
+   ALB duoc workflow hien tai phuc hoi bang AWS CLI nen can import vao Terraform
+   state neu sau nay muon quan ly 100% bang Terraform.
 3. Quan ly secret qua GitHub Actions secrets hoac AWS Secrets Manager, khong
    hard-code trong task definition.
 4. Upload model artifact moi len S3 sau retrain, gom ca `model.pkl`,
