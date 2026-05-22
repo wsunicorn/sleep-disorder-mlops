@@ -302,11 +302,19 @@ if not_found "$LISTENER_ARN"; then
     --default-actions "Type=forward,TargetGroupArn=$TG_ARN" \
     >/dev/null
 else
-  echo "Updating HTTP listener default action"
-  aws elbv2 modify-listener \
-    --listener-arn "$LISTENER_ARN" \
-    --default-actions "Type=forward,TargetGroupArn=$TG_ARN" \
-    >/dev/null
+  CURRENT_LISTENER_TG_ARN=$(aws elbv2 describe-listeners \
+    --listener-arns "$LISTENER_ARN" \
+    --query "Listeners[0].DefaultActions[0].TargetGroupArn" \
+    --output text 2>/dev/null || true)
+  if [[ "$CURRENT_LISTENER_TG_ARN" == "$TG_ARN" ]]; then
+    echo "HTTP listener already forwards to target group"
+  else
+    echo "Updating HTTP listener default action"
+    aws elbv2 modify-listener \
+      --listener-arn "$LISTENER_ARN" \
+      --default-actions "Type=forward,TargetGroupArn=$TG_ARN" \
+      >/dev/null
+  fi
 fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
