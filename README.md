@@ -8,16 +8,28 @@ README này đóng vai trò như tài liệu tổng hợp cho project: vừa là
 
 - Notebook chuẩn: `notebooks/kaggle_cap_training.ipynb`.
 - Schema đặc trưng: 24 đặc trưng EEG theo cửa sổ 2 giây.
-- Mô hình tốt nhất hiện tại: LightGBM.
+- Mô hình benchmark theo notebook: LightGBM.
+- Mô hình đang phục vụ production: model trong MLflow Registry stage `Production` (lần xác minh gần nhất là run XGBoost).
 - Số lớp: 7 lớp rối loạn/bình thường.
-- Weighted F1 validation hiện tại: `0.5929`.
-- Accuracy validation hiện tại: `0.5908`.
+- Weighted F1 validation theo notebook/artifact nền: `0.5929`.
+- Accuracy validation theo notebook/artifact nền: `0.5908`.
 - API production: Django REST Framework.
 - Hạ tầng deploy: Docker -> ECR -> ECS Fargate -> Application Load Balancer.
 - CI/CD: GitHub Actions tự test, build, push image, deploy ECS, chạy migrate và smoke test.
 - URL web app hiện tại: `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com`.
 - MLflow production: `http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`.
 - Model Registry stage phục vụ: `Production`, có fallback tải artifact từ S3 khi registry tạm thời không sẵn sàng.
+
+Xác minh production gần nhất ngày 22/05/2026:
+
+- `Retrain - Promote - Redeploy` run `26295251334`: thành công.
+- CI/CD redeploy do retrain kích hoạt run `26295366238`: thành công, gồm test, build/push image, deploy ECS, migrate và smoke test.
+- `MLflow Server - Build and Deploy` run `26294401501`: thành công.
+- Endpoint `/api/v1/health/`: trả `status=ok`.
+- Endpoint `/api/v1/model-info/`: trả `ready=True`, `feature_count=24`, `model_stage=Production`, `model_type=PyFuncModel`.
+- MLflow UI port `5000`: trả HTTP `200`.
+- MLflow experiment `sleep-disorder-kaggle`: có các run `XGBoost`, `LightGBM`, `RandomForest`.
+- MLflow Model Registry `sleep-disorder-classifier`: có version `1`, stage `Production`, status `READY`, run id `4f50ad8b6ac84a5582f0cb8886e4fd18`.
 
 ## Mục lục
 
