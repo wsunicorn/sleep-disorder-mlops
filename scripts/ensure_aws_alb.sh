@@ -50,7 +50,19 @@ if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 || "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; 
 fi
 
 if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 || "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; then
-  echo "Could not find public subnets in VPC $VPC_ID; creating two replacement public subnets."
+  echo "Could not find public subnets in route tables; checking map-public-ip-on-launch subnets."
+  MAP_PUBLIC_SUBNET_IDS=$(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
+    --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
+    --output text)
+  read -r -a PUBLIC_SUBNETS <<< "$MAP_PUBLIC_SUBNET_IDS"
+  if [[ "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; then
+    PUBLIC_SUBNETS=()
+  fi
+fi
+
+if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 ]]; then
+  echo "Creating replacement public subnets until two are available."
   VPC_CIDR=$(aws ec2 describe-vpcs \
     --vpc-ids "$VPC_ID" \
     --query "Vpcs[0].CidrBlock" \
@@ -90,10 +102,15 @@ PY
     --output text)
   read -r -a AZS <<< "$AZ_NAMES"
 
-  PUBLIC_SUBNETS=()
-  for index in 0 1; do
-    CIDR="${CANDIDATE_CIDRS_ARRAY[$index]}"
-    AZ="${AZS[$index]}"
+  candidate_index=0
+  while [[ ${#PUBLIC_SUBNETS[@]} -lt 2 ]]; do
+    if [[ $candidate_index -ge ${#CANDIDATE_CIDRS_ARRAY[@]} ]]; then
+      echo "Could not find enough free CIDR blocks to create public subnets." >&2
+      exit 1
+    fi
+    index="${#PUBLIC_SUBNETS[@]}"
+    CIDR="${CANDIDATE_CIDRS_ARRAY[$candidate_index]}"
+    AZ="${AZS[$(( index % ${#AZS[@]} ))]}"
     echo "Creating public subnet $CIDR in $AZ"
     SUBNET_ID=$(aws ec2 create-subnet \
       --vpc-id "$VPC_ID" \
@@ -106,8 +123,10 @@ PY
       --map-public-ip-on-launch
     aws ec2 create-tags \
       --resources "$SUBNET_ID" \
-      --tags "Key=Name,Value=${PROJECT_NAME}-public-${index}"
+      --tags "Key=Name,Value=${PROJECT_NAME}-public-${index}" \
+      >/dev/null 2>&1 || true
     PUBLIC_SUBNETS+=("$SUBNET_ID")
+    candidate_index=$((candidate_index + 1))
   done
 
   IGW_ID=$(aws ec2 describe-internet-gateways \
@@ -119,7 +138,10 @@ PY
     IGW_ID=$(aws ec2 create-internet-gateway \
       --query "InternetGateway.InternetGatewayId" \
       --output text)
-    aws ec2 create-tags --resources "$IGW_ID" --tags "Key=Name,Value=${PROJECT_NAME}-igw"
+    aws ec2 create-tags \
+      --resources "$IGW_ID" \
+      --tags "Key=Name,Value=${PROJECT_NAME}-igw" \
+      >/dev/null 2>&1 || true
     aws ec2 attach-internet-gateway --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
   fi
 
@@ -129,7 +151,8 @@ PY
     --output text)
   aws ec2 create-tags \
     --resources "$ROUTE_TABLE_ID" \
-    --tags "Key=Name,Value=${PROJECT_NAME}-public-rt"
+    --tags "Key=Name,Value=${PROJECT_NAME}-public-rt" \
+    >/dev/null 2>&1 || true
   aws ec2 create-route \
     --route-table-id "$ROUTE_TABLE_ID" \
     --destination-cidr-block "0.0.0.0/0" \
@@ -157,7 +180,10 @@ if not_found "$ALB_SG_ID"; then
     --vpc-id "$VPC_ID" \
     --query "GroupId" \
     --output text)
-  aws ec2 create-tags --resources "$ALB_SG_ID" --tags "Key=Name,Value=$ALB_SG_NAME"
+  aws ec2 create-tags \
+    --resources "$ALB_SG_ID" \
+    --tags "Key=Name,Value=$ALB_SG_NAME" \
+    >/dev/null 2>&1 || true
 fi
 
 aws ec2 authorize-security-group-ingress \
@@ -209,7 +235,10 @@ if not_found "$TG_ARN"; then
     --matcher "HttpCode=200" \
     --query "TargetGroups[0].TargetGroupArn" \
     --output text)
-  aws elbv2 add-tags --resource-arns "$TG_ARN" --tags "Key=Name,Value=$TARGET_GROUP_NAME"
+  aws elbv2 add-tags \
+    --resource-arns "$TG_ARN" \
+    --tags "Key=Name,Value=$TARGET_GROUP_NAME" \
+    >/dev/null 2>&1 || true
 fi
 echo "Target group: $TG_ARN"
 
@@ -228,7 +257,10 @@ if not_found "$ALB_ARN"; then
     --subnets "${PUBLIC_SUBNETS[@]}" \
     --query "LoadBalancers[0].LoadBalancerArn" \
     --output text)
-  aws elbv2 add-tags --resource-arns "$ALB_ARN" --tags "Key=Name,Value=$ALB_NAME"
+  aws elbv2 add-tags \
+    --resource-arns "$ALB_ARN" \
+    --tags "Key=Name,Value=$ALB_NAME" \
+    >/dev/null 2>&1 || true
 fi
 
 aws elbv2 wait load-balancer-available --load-balancer-arns "$ALB_ARN"
