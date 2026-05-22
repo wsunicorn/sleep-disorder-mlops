@@ -161,6 +161,8 @@ Workflow da duoc chinh de:
   tam tat task de tiet kiem chi phi;
 - lay subnet/security group cua migration task tu ECS service thay vi hard-code
   ID cu.
+- tu query ALB `sleep-portal-alb`, in ra URL that va smoke test `/api/v1/health/`
+  cung `/api/v1/model-info/` sau deploy.
 
 Luu y quan trong: neu chi scale ECS service ve 0 thi CI/CD co the bat lai bang
 `desired-count 1`. Neu da xoa ALB/target group/service hoac resource ha tang
