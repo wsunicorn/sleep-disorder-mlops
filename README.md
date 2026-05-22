@@ -1023,11 +1023,21 @@ Luồng tự động:
 6. Model mới được log vào MLflow, đăng ký vào Registry, promote lên `Production` nếu vượt `MODEL_PROMOTE_THRESHOLD`, đồng thời label encoder, feature schema và metadata được upload lên S3.
 7. Workflow retrain gọi lại `ci.yml` để build image mới, deploy ECS, migrate database và smoke test.
 
-Tạo reference feature ban đầu từ dữ liệu CAP:
+Tạo reference feature ban đầu từ dữ liệu CAP đầy đủ:
 
 ```powershell
 python scripts/export_reference_features.py `
   --data-dir data/raw/balanced_CAP `
+  --output data/features/reference/features.parquet `
+  --s3-uri s3://sleep-mlops-651709/features/reference/features.parquet
+```
+
+Nếu cần chuẩn bị nhanh cho demo/retrain trên GitHub Actions, có thể tạo reference từ `feature_stats.json` đã sinh theo notebook. Cách này vẫn giữ đúng schema 24 đặc trưng và 7 lớp, nhưng là dữ liệu tham chiếu mô phỏng từ thống kê thay vì đọc lại toàn bộ CSV lớn:
+
+```powershell
+python scripts/export_reference_features.py `
+  --stats-path data/raw/balanced_CAP/feature_stats.json `
+  --stats-samples-per-class 1000 `
   --output data/features/reference/features.parquet `
   --s3-uri s3://sleep-mlops-651709/features/reference/features.parquet
 ```
@@ -1077,12 +1087,20 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
    - `MLFLOW_TRACKING_URI=http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com:5000`
    - `MODEL_PROMOTE_STAGE=Production`
    - `MODEL_PROMOTE_THRESHOLD=0.55`
-3. Bật lại các service nếu trước đó đã tắt để tiết kiệm chi phí:
+3. Nếu `DRIFT_REFERENCE_DATA` chưa có trên S3, tạo nhanh từ `feature_stats.json`:
+   ```powershell
+   python scripts/export_reference_features.py `
+     --stats-path data/raw/balanced_CAP/feature_stats.json `
+     --stats-samples-per-class 1000 `
+     --output data/features/reference/features.parquet `
+     --s3-uri s3://sleep-mlops-651709/features/reference/features.parquet
+   ```
+4. Bật lại các service nếu trước đó đã tắt để tiết kiệm chi phí:
    ```powershell
    gh workflow run mlflow.yml --ref main -f reason="Demo MLflow production"
    gh workflow run ci.yml --ref main -f reason="Demo web app production"
    ```
-4. Đợi hai workflow xanh, sau đó kiểm tra:
+5. Đợi hai workflow xanh, sau đó kiểm tra:
    ```powershell
    curl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/health/
    curl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/model-info/
