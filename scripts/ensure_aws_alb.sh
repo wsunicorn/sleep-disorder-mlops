@@ -50,9 +50,97 @@ if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 || "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; 
 fi
 
 if [[ ${#PUBLIC_SUBNETS[@]} -lt 2 || "${PUBLIC_SUBNETS[0]:-None}" == "None" ]]; then
-  echo "Could not find at least two public subnets in VPC $VPC_ID." >&2
-  echo "Recreate/import the Terraform network stack before restoring the ALB." >&2
-  exit 1
+  echo "Could not find public subnets in VPC $VPC_ID; creating two replacement public subnets."
+  VPC_CIDR=$(aws ec2 describe-vpcs \
+    --vpc-ids "$VPC_ID" \
+    --query "Vpcs[0].CidrBlock" \
+    --output text)
+  EXISTING_CIDRS=$(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
+    --query "Subnets[].CidrBlock" \
+    --output text)
+  CANDIDATE_CIDRS=$(python3 - "$VPC_CIDR" "$EXISTING_CIDRS" <<'PY'
+import ipaddress
+import sys
+
+vpc = ipaddress.ip_network(sys.argv[1])
+existing = [
+    ipaddress.ip_network(item)
+    for item in sys.argv[2].split()
+    if item.strip()
+]
+
+chosen = []
+for subnet in vpc.subnets(new_prefix=24):
+    if any(subnet.overlaps(current) for current in existing):
+        continue
+    chosen.append(str(subnet))
+    if len(chosen) == 2:
+        break
+
+if len(chosen) < 2:
+    raise SystemExit("Could not find two free /24 CIDR blocks in the VPC.")
+
+print(" ".join(chosen))
+PY
+)
+  read -r -a CANDIDATE_CIDRS_ARRAY <<< "$CANDIDATE_CIDRS"
+  AZ_NAMES=$(aws ec2 describe-availability-zones \
+    --query "AvailabilityZones[0:2].ZoneName" \
+    --output text)
+  read -r -a AZS <<< "$AZ_NAMES"
+
+  PUBLIC_SUBNETS=()
+  for index in 0 1; do
+    CIDR="${CANDIDATE_CIDRS_ARRAY[$index]}"
+    AZ="${AZS[$index]}"
+    echo "Creating public subnet $CIDR in $AZ"
+    SUBNET_ID=$(aws ec2 create-subnet \
+      --vpc-id "$VPC_ID" \
+      --cidr-block "$CIDR" \
+      --availability-zone "$AZ" \
+      --query "Subnet.SubnetId" \
+      --output text)
+    aws ec2 modify-subnet-attribute \
+      --subnet-id "$SUBNET_ID" \
+      --map-public-ip-on-launch
+    aws ec2 create-tags \
+      --resources "$SUBNET_ID" \
+      --tags "Key=Name,Value=${PROJECT_NAME}-public-${index}"
+    PUBLIC_SUBNETS+=("$SUBNET_ID")
+  done
+
+  IGW_ID=$(aws ec2 describe-internet-gateways \
+    --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+    --query "InternetGateways[0].InternetGatewayId" \
+    --output text 2>/dev/null || true)
+  if not_found "$IGW_ID"; then
+    echo "Creating and attaching internet gateway"
+    IGW_ID=$(aws ec2 create-internet-gateway \
+      --query "InternetGateway.InternetGatewayId" \
+      --output text)
+    aws ec2 create-tags --resources "$IGW_ID" --tags "Key=Name,Value=${PROJECT_NAME}-igw"
+    aws ec2 attach-internet-gateway --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
+  fi
+
+  ROUTE_TABLE_ID=$(aws ec2 create-route-table \
+    --vpc-id "$VPC_ID" \
+    --query "RouteTable.RouteTableId" \
+    --output text)
+  aws ec2 create-tags \
+    --resources "$ROUTE_TABLE_ID" \
+    --tags "Key=Name,Value=${PROJECT_NAME}-public-rt"
+  aws ec2 create-route \
+    --route-table-id "$ROUTE_TABLE_ID" \
+    --destination-cidr-block "0.0.0.0/0" \
+    --gateway-id "$IGW_ID" \
+    >/dev/null 2>&1 || true
+  for subnet_id in "${PUBLIC_SUBNETS[@]}"; do
+    aws ec2 associate-route-table \
+      --route-table-id "$ROUTE_TABLE_ID" \
+      --subnet-id "$subnet_id" \
+      >/dev/null
+  done
 fi
 echo "Public subnets: ${PUBLIC_SUBNETS[*]}"
 
