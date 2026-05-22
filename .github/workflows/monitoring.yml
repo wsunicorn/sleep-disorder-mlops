@@ -1,6 +1,11 @@
 name: Monitoring - Drift Check
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/monitoring.yml"
+      - "monitoring/**"
   workflow_dispatch:
     inputs:
       reference_data:
@@ -16,6 +21,8 @@ on:
 
 env:
   AWS_REGION: ap-southeast-1
+  MONITOR_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  MONITOR_AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
 jobs:
   drift-check:
@@ -24,44 +31,73 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve drift inputs
+        id: drift-inputs
+        shell: bash
+        run: |
+          REF="${{ inputs.reference_data || vars.DRIFT_REFERENCE_DATA || '' }}"
+          CUR="${{ inputs.current_data || vars.DRIFT_CURRENT_DATA || '' }}"
+
+          if [ -z "$REF" ] || [ -z "$CUR" ]; then
+            echo "No drift data configured; skipping monitoring check."
+            echo "Set workflow inputs or repository variables DRIFT_REFERENCE_DATA and DRIFT_CURRENT_DATA."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NEEDS_AWS=false
+          if [[ "$REF" == s3://* || "$CUR" == s3://* ]]; then
+            NEEDS_AWS=true
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "needs_aws=$NEEDS_AWS" >> "$GITHUB_OUTPUT"
+          echo "reference_data=$REF" >> "$GITHUB_OUTPUT"
+          echo "current_data=$CUR" >> "$GITHUB_OUTPUT"
+
       - name: Set up Python 3.11
+        if: steps.drift-inputs.outputs.enabled == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install monitoring dependencies
+        if: steps.drift-inputs.outputs.enabled == 'true'
         run: |
           pip install --upgrade pip
           pip install pandas pyarrow "evidently>=0.4.0,<0.5.0" boto3 python-dotenv loguru
 
+      - name: Validate AWS credentials for S3 data
+        if: >-
+          steps.drift-inputs.outputs.needs_aws == 'true' &&
+          (env.MONITOR_AWS_ACCESS_KEY_ID == '' || env.MONITOR_AWS_SECRET_ACCESS_KEY == '')
+        run: |
+          echo "::error::S3 drift data requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY secrets."
+          exit 1
+
       - name: Configure AWS credentials
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
+        if: >-
+          steps.drift-inputs.outputs.needs_aws == 'true' &&
+          env.MONITOR_AWS_ACCESS_KEY_ID != '' &&
+          env.MONITOR_AWS_SECRET_ACCESS_KEY != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ env.MONITOR_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.MONITOR_AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Run drift detection
+        if: steps.drift-inputs.outputs.enabled == 'true'
         continue-on-error: true
         shell: bash
         run: |
-          REF="${{ github.event.inputs.reference_data || vars.DRIFT_REFERENCE_DATA }}"
-          CUR="${{ github.event.inputs.current_data || vars.DRIFT_CURRENT_DATA }}"
-
-          if [ -z "$REF" ] || [ -z "$CUR" ]; then
-            echo "Missing reference/current data paths."
-            echo "Set workflow inputs or repository variables DRIFT_REFERENCE_DATA and DRIFT_CURRENT_DATA."
-            exit 0
-          fi
-
           python monitoring/drift_detection.py \
-            --reference-data "$REF" \
-            --current-data "$CUR" \
+            --reference-data "${{ steps.drift-inputs.outputs.reference_data }}" \
+            --current-data "${{ steps.drift-inputs.outputs.current_data }}" \
             --output-report reports/
 
       - name: Upload drift reports
-        if: always()
+        if: always() && steps.drift-inputs.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: drift-reports
