@@ -236,6 +236,7 @@ def predict_page(request):
         "dashboard/predict.html",
         {
             "expected_feature_count": feature_count,
+            "edf_sync_max_epochs": getattr(settings, "EDF_SYNC_MAX_EPOCHS", 96),
             "model_status": model_status,
             **display,
         },

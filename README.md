@@ -705,7 +705,7 @@ Endpoint:
 | GET    | `/api/v1/health/`      | Health check cho ALB/ECS                     |
 | GET    | `/api/v1/model-info/`  | Trả metadata model đang phục vụ          |
 | POST   | `/api/v1/predict/`     | Dự đoán từ batch feature 24 cột         |
-| POST   | `/api/v1/predict-edf/` | Upload EDF, trích xuất feature, dự đoán |
+| POST   | `/api/v1/predict-edf/` | Upload EDF, trích xuất feature, dự đoán theo số epoch giới hạn cho demo web |
 | POST   | `/api/v1/ingest/`      | Lưu kết quả mô phỏng IoT vào database  |
 
 Ý nghĩa:
@@ -713,6 +713,7 @@ Endpoint:
 - API tách riêng logic dự đoán khỏi giao diện.
 - Có endpoint health để ALB và CI/CD kiểm tra hệ thống [28].
 - Có endpoint model-info để xác nhận model production đúng schema 24 feature.
+- Endpoint EDF đồng bộ dùng PyEDFlib để đọc trực tiếp một kênh và số sample cần thiết, lọc 0.5-40 Hz bằng SciPy, mặc định xử lý `EDF_SYNC_MAX_EPOCHS=96` epoch đầu tiên để tránh timeout qua ALB; luồng EDF dài nên chạy bằng `iot_simulation/simulator.py` hoặc batch pipeline.
 - Có cache Redis cho kết quả dự đoán lặp lại, giảm tải inference [23].
 
 ### 2.2.4. Chức năng dashboard
@@ -910,6 +911,7 @@ Hạn chế hiện tại:
 - Chưa có calibration, uncertainty estimation hoặc giải thích dự đoán.
 - Vòng retrain hiện dùng nhãn/pseudo-label từ dữ liệu ingest nếu chưa có nhãn bác sĩ xác nhận, nên cần quy trình kiểm duyệt dữ liệu trước khi dùng thật.
 - MLflow production đã được tách thành ECS service riêng, nhưng hiện vẫn đang public qua ALB port `5000`; nếu dùng lâu dài nên thêm xác thực, HTTPS/domain riêng hoặc giới hạn IP.
+- Upload EDF full-night không nên chạy như một request web đồng bộ; production đúng nghĩa nên đưa file lớn vào S3/job queue, còn trang demo web hiện xử lý số epoch giới hạn để phản hồi ổn định sau ALB.
 - AWS user hiện tại không có quyền tạo IAM role mới trong workflow. Hệ thống có fallback dùng GitHub Secrets cho ECS task khi thiếu task role, nhưng bản production chặt chẽ hơn nên provision IAM task role bằng Terraform/admin.
 - Terraform và script AWS CLI đang cùng tồn tại; về lâu dài nên đưa toàn bộ hạ tầng về Terraform state để tránh lệch trạng thái.
 - Giao diện và thông điệp cảnh báo y tế cần được làm rõ hơn nếu demo cho người không chuyên.

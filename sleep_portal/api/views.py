@@ -82,8 +82,18 @@ class PredictEDFView(APIView):
         if uploaded.size > 500 * 1024 * 1024:
             return Response({"error": "File too large (max 500 MB)."}, status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
+        sync_epoch_limit = int(getattr(settings, "EDF_SYNC_MAX_EPOCHS", 96))
+        requested_max_epochs = request.data.get("max_epochs") or request.query_params.get("max_epochs")
+        if requested_max_epochs not in (None, ""):
+            try:
+                sync_epoch_limit = min(sync_epoch_limit, max(1, int(requested_max_epochs)))
+            except (TypeError, ValueError):
+                return Response({"error": "max_epochs must be a positive integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+        tmp_path = None
         try:
-            import mne
+            import pyedflib
+            from scipy import signal as scipy_signal
             from feature_engineering.cap_features import (
                 WINDOW_SEC,
                 extract_feature_matrix,
@@ -95,33 +105,45 @@ class PredictEDFView(APIView):
                     tmp.write(chunk)
                 tmp_path = tmp.name
 
-            # Load EDF and pick the first EEG channel.
-            raw = mne.io.read_raw_edf(tmp_path, preload=True, verbose=False)
-            Path(tmp_path).unlink(missing_ok=True)
+            # PyEDFlib lets the API read only the channel/sample span needed
+            # for the synchronous web demo instead of loading a full-night EDF.
+            reader = pyedflib.EdfReader(tmp_path)
+            try:
+                labels = list(reader.getSignalLabels())
+                if not labels:
+                    return Response({"error": "EDF file does not contain any signal channel."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
-            sfreq = raw.info["sfreq"]
-            duration = raw.times[-1]
+                ch_idx = next(
+                    (idx for idx, label in enumerate(labels) if "eeg" in label.lower()),
+                    0,
+                )
+                channel_used = labels[ch_idx]
+                sfreq = float(reader.getSampleFrequency(ch_idx))
+                total_samples = int(reader.getNSamples()[ch_idx])
+                duration = float(total_samples / sfreq) if sfreq else 0.0
+
+                # Epoch into notebook-standard 2-second windows.
+                window_sec = WINDOW_SEC
+                window_samples = int(window_sec * sfreq)
+                if window_samples < 16:
+                    return Response({"error": "Sampling rate too low for 2-second window."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+                total_epochs = int(total_samples // window_samples)
+                if total_epochs == 0:
+                    return Response({"error": "Recording too short for 2-second epochs."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+                processed_epochs = min(total_epochs, sync_epoch_limit)
+
+                samples_to_read = processed_epochs * window_samples
+                signal = reader.readSignal(ch_idx, start=0, n=samples_to_read)
+            finally:
+                reader.close()
 
             # Bandpass filter 0.5-40 Hz.
-            raw.filter(l_freq=0.5, h_freq=40.0, method="fir", verbose=False)
-
-            # Pick single EEG channel (first available)
-            eeg_picks = mne.pick_types(raw.info, eeg=True, exclude="bads")
-            if len(eeg_picks) == 0:
-                eeg_picks = [0]
-            ch_idx = eeg_picks[0]
-            signal, _ = raw[[ch_idx], :]   # shape (1, n_samples)
-            signal = signal[0]             # flatten to 1D
-
-            # Epoch into notebook-standard 2-second windows.
-            window_sec = WINDOW_SEC
-            window_samples = int(window_sec * sfreq)
-            if window_samples < 16:
-                return Response({"error": "Sampling rate too low for 2-second window."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-
-            n_epochs = int(len(signal) // window_samples)
-            if n_epochs == 0:
-                return Response({"error": "Recording too short for 2-second epochs."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            high_freq = min(40.0, (sfreq / 2.0) - 1e-6)
+            if high_freq <= 0.5:
+                return Response({"error": "Sampling rate too low for 0.5-40 Hz bandpass."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            sos = scipy_signal.butter(4, [0.5, high_freq], btype="bandpass", fs=sfreq, output="sos")
+            signal = scipy_signal.sosfiltfilt(sos, signal)
 
             features = extract_feature_matrix(
                 signal,
@@ -129,16 +151,19 @@ class PredictEDFView(APIView):
                 window_samples=window_samples,
             )
             result = predict(features)
-            result["n_epochs"] = n_epochs
+            result["n_epochs"] = total_epochs
+            result["processed_epochs"] = int(features.shape[0])
+            result["truncated"] = bool(processed_epochs < total_epochs)
+            result["sync_epoch_limit"] = sync_epoch_limit
             result["sfreq"] = sfreq
             result["duration_sec"] = duration
-            result["channel_used"] = raw.ch_names[ch_idx]
+            result["channel_used"] = channel_used
             result["window_sec"] = window_sec
             return Response(result, status=status.HTTP_200_OK)
 
         except ImportError:
             return Response(
-                {"error": "MNE-Python is not installed. Install with: pip install mne"},
+                {"error": "PyEDFlib is not installed. Install with: pip install pyedflib"},
                 status=status.HTTP_501_NOT_IMPLEMENTED,
             )
         except Exception as e:
@@ -147,6 +172,9 @@ class PredictEDFView(APIView):
                 {"error": f"EDF processing failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        finally:
+            if tmp_path:
+                Path(tmp_path).unlink(missing_ok=True)
 
 
 class HealthCheckView(APIView):

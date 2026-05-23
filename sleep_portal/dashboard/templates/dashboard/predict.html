@@ -257,9 +257,9 @@
         <span class="chip chip-warning">Toàn bộ quy trình</span>
       </div>
       <p class="helper-text mb-4">
-        Tải lên file ghi <code>.edf</code> đa kênh giấc ngủ. Máy chủ sẽ áp dụng toàn bộ quy trình tiền xử lý:
+        Tải lên file ghi <code>.edf</code> đa kênh giấc ngủ. Máy chủ sẽ áp dụng quy trình tiền xử lý:
         lọc băng thông → phân đoạn epoch 2 giây → trích xuất đặc trưng → dự đoán.
-        <br><strong>Lưu ý:</strong> File EDF lớn (&gt; 100 MB) có thể mất 30–60 giây để xử lý.
+        <br><strong>Lưu ý:</strong> Chế độ demo web xử lý tối đa {{ edf_sync_max_epochs }} epoch đầu tiên để phản hồi ổn định sau ALB; dữ liệu dài hơn nên chạy qua IoT/batch pipeline.
       </p>
 
       <div class="row g-4">
@@ -268,6 +268,7 @@
             <label class="form-label" for="edf-file">Chọn file EDF</label>
             <input id="edf-file" class="form-control" type="file" accept=".edf">
             <p class="helper-text mt-2">Định dạng: European Data Format (.edf)</p>
+            <input id="edf-max-epochs" type="hidden" value="{{ edf_sync_max_epochs }}">
             <div id="edf-file-info" class="mt-2 d-none">
               <span class="chip chip-soft" id="edf-file-name"></span>
             </div>
@@ -310,7 +311,7 @@
       <div class="pipeline-diagram mt-4">
         <span class="pipeline-step">File EDF</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">MNE bandpass</span>
+        <span class="pipeline-step">PyEDFlib + bandpass</span>
         <span class="pipeline-arrow">→</span>
         <span class="pipeline-step">Epoch 2 giây</span>
         <span class="pipeline-arrow">→</span>
@@ -600,6 +601,7 @@
   const edfCard    = document.getElementById("edf-result-card");
   const edfErrCard = document.getElementById("edf-error-card");
   const edfBreakdown = document.getElementById("edf-breakdown");
+  const edfMaxEpochs = document.getElementById("edf-max-epochs");
 
   edfFile.addEventListener("change", (e) => {
     const file = e.target.files[0];
@@ -622,6 +624,7 @@
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("max_epochs", edfMaxEpochs.value || "96");
       const res = await fetch(PREDICT_EDF_URL, { method: "POST", body: formData });
       const payload = await parseApiResponse(res);
 
@@ -631,7 +634,10 @@
       document.getElementById("edf-name").textContent = info.vi;
       document.getElementById("edf-name").style.color = info.color;
       document.getElementById("edf-en").textContent = info.en;
-      document.getElementById("edf-desc").textContent = "Tổng số epoch: " + (payload.prediction_count || 0);
+      const processed = payload.processed_epochs || payload.prediction_count || 0;
+      const totalEpochs = payload.n_epochs || processed;
+      const truncatedText = payload.truncated ? " (đã giới hạn cho demo web)" : "";
+      document.getElementById("edf-desc").textContent = "Đã xử lý " + processed + "/" + totalEpochs + " epoch" + truncatedText;
       edfCard.classList.add("visible");
 
       if (payload.class_counts && Object.keys(payload.class_counts).length > 0) {

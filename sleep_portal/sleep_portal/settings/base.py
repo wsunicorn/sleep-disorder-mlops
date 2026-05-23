@@ -168,6 +168,10 @@ MLOPS_FEATURE_STORE_LOCAL_DIR = os.environ.get(
 )
 MLOPS_FEATURE_STORE_S3_URI = os.environ.get("MLOPS_FEATURE_STORE_S3_URI", "")
 
+# Synchronous EDF uploads run behind an ALB, so keep the interactive request
+# bounded. Full-night processing should use the IoT/batch pipeline.
+EDF_SYNC_MAX_EPOCHS = max(1, int(os.environ.get("EDF_SYNC_MAX_EPOCHS", "96")))
+
 # Security headers (production)
 if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
