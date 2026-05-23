@@ -5,7 +5,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.utils import timezone
 
 
@@ -274,6 +274,39 @@ class TestDashboardPages:
         assert not Patient.objects.filter(patient_id=patient.patient_id).exists()
         assert EpochPrediction.objects.count() == 0
         assert "Đã xóa hồ sơ DEMO-IOT-HEA-999" in response.content.decode("utf-8")
+
+    def test_patient_delete_sets_and_requires_real_csrf_cookie(self):
+        from dashboard.models import Patient, EpochPrediction
+
+        patient = Patient.objects.create(
+            patient_id="demo-iot-healthy-998",
+            diagnosis="healthy",
+            age=29,
+            gender="F",
+        )
+        EpochPrediction.objects.create(
+            patient=patient,
+            epoch_index=0,
+            predicted_class="healthy",
+            confidence=0.93,
+            timestamp=timezone.now(),
+        )
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        response = csrf_client.get("/patients/")
+        assert response.status_code == 200
+        assert "csrftoken" in csrf_client.cookies
+
+        token = csrf_client.cookies["csrftoken"].value
+        response = csrf_client.post(
+            f"/patients/{patient.patient_id}/delete/",
+            {"csrfmiddlewaretoken": token},
+            HTTP_X_CSRFTOKEN=token,
+            follow=True,
+        )
+
+        assert response.status_code == 200
+        assert not Patient.objects.filter(patient_id=patient.patient_id).exists()
 
     def test_patient_display_code_keeps_raw_id_intact(self):
         from dashboard.models import Patient

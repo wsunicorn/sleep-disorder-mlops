@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from .models import Patient, EpochPrediction
@@ -171,6 +172,7 @@ def dashboard_home(request):
     )
 
 
+@ensure_csrf_cookie
 def patient_list(request):
     patients = (
         Patient.objects.annotate(
@@ -195,6 +197,7 @@ def patient_list(request):
     )
 
 
+@ensure_csrf_cookie
 def patient_detail(request, patient_id):
     patient = get_object_or_404(Patient, patient_id=patient_id)
     predictions = EpochPrediction.objects.filter(patient=patient).order_by("epoch_index")
