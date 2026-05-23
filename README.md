@@ -1000,14 +1000,17 @@ Sau đó mở:
 - Health check: `http://127.0.0.1:8000/api/v1/health/`
 - Model info: `http://127.0.0.1:8000/api/v1/model-info/`
 
-## Demo nhanh giao diện và API bằng dữ liệu IoT
+## Demo giao diện và API bằng dữ liệu IoT
 
-Thư mục `demo_web_iot/` chứa bộ dữ liệu nhỏ để test từng phần của website khi demo:
+Thư mục `demo_web_iot/` chứa hai mức demo:
 
 - `predict_single_healthy.json`: gọi thử `/api/v1/predict/` với 1 vector 24 đặc trưng.
 - `predict_batch.csv`: tải lên tab "CSV theo lô" trong Studio Suy luận.
 - `ingest_patient_*.json`: tạo bệnh nhân và epoch demo qua `/api/v1/ingest/`.
 - `run_demo_rest.ps1`: chạy lần lượt health, model-info, predict single, predict batch và ingest.
+- `generated/`: bộ demo lớn đã sinh sẵn, gồm 24 bệnh nhân, 1152 epoch và đủ 7 nhóm bệnh.
+- `generate_rich_iot_demo.py`: sinh lại bộ demo lớn từ `feature_stats.json`.
+- `run_rich_demo.ps1`: post bộ demo lớn lên API để dashboard có nhiều dữ liệu hơn.
 
 Chạy với server local:
 
@@ -1027,6 +1030,30 @@ Sau khi script chạy xong, mở:
 - `/patients/` để xem hồ sơ `demo-iot-*`.
 - `/patients/demo-iot-mixed-001/` để trình bày timeline epoch nhiều nhãn.
 - `/pipeline/` để giải thích các lớp MLOps production.
+
+Chạy demo lớn nhiều bệnh nhân/nhiều epoch trên production:
+
+```powershell
+.\demo_web_iot\run_rich_demo.ps1 -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
+```
+
+Muốn sinh lại dữ liệu lớn hơn trước khi post:
+
+```powershell
+.\demo_web_iot\run_rich_demo.ps1 `
+  -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
+  -Regenerate `
+  -PatientsPerClass 5 `
+  -MixedPatients 5 `
+  -EpochsPerPatient 96
+```
+
+Kết quả mặc định của bộ rich demo:
+
+- 24 bệnh nhân, mỗi bệnh nhân 48 epoch.
+- 1152 epoch ingest vào hệ thống.
+- CSV `generated/predict_batch_rich.csv` có 56 dòng để test tab CSV theo lô.
+- Các ca `demo-rich-mixed-*` có timeline nhiều nhãn để trình bày biểu đồ bệnh nhân.
 
 Nếu muốn demo từ EDF thật theo kiểu thiết bị IoT gửi dữ liệu về hệ thống:
 
@@ -1245,12 +1272,21 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
    - Giải thích rằng production serving sẽ ưu tiên MLflow Registry, nếu lỗi sẽ fallback `model.pkl` từ S3.
 5. Demo luồng IoT nhiều bệnh nhân:
 
-   Cách nhanh nhất là dùng bộ dữ liệu demo cố định:
+   Cách nhanh nhất là dùng bộ dữ liệu nhỏ cố định:
 
    ```powershell
    .\demo_web_iot\run_demo_rest.ps1 `
      -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
    ```
+
+   Cách đẹp hơn khi demo dashboard là dùng bộ rich demo:
+
+   ```powershell
+   .\demo_web_iot\run_rich_demo.ps1 `
+     -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
+   ```
+
+   Bộ rich demo mặc định tạo 24 bệnh nhân, 1152 epoch, đủ 7 nhóm bệnh và các ca mixed để biểu đồ timeline không bị quá đơn điệu.
 
    Nếu muốn demo từ EDF thật, dùng simulator REST:
 
