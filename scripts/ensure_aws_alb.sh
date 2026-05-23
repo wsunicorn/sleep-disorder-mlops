@@ -284,10 +284,14 @@ fi
 
 aws elbv2 wait load-balancer-available --load-balancer-arns "$ALB_ARN"
 echo "Ensuring ALB idle timeout is ${ALB_IDLE_TIMEOUT_SECONDS}s"
-aws elbv2 modify-load-balancer-attributes \
+if aws elbv2 modify-load-balancer-attributes \
   --load-balancer-arn "$ALB_ARN" \
   --attributes "Key=idle_timeout.timeout_seconds,Value=$ALB_IDLE_TIMEOUT_SECONDS" \
-  >/dev/null
+  >/dev/null 2>&1; then
+  echo "ALB idle timeout is ${ALB_IDLE_TIMEOUT_SECONDS}s"
+else
+  echo "Warning: could not update ALB idle timeout; continuing deploy. Grant elasticloadbalancing:ModifyLoadBalancerAttributes to allow long EDF uploads." >&2
+fi
 ALB_DNS=$(aws elbv2 describe-load-balancers \
   --load-balancer-arns "$ALB_ARN" \
   --query "LoadBalancers[0].DNSName" \

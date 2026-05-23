@@ -274,8 +274,11 @@ jobs:
           echo "App URL: $APP_URL"
           curl --fail --retry 12 --retry-delay 10 --retry-all-errors --max-time 20 \
             "$APP_URL/api/v1/health/"
-          curl --fail --retry 3 --retry-delay 5 --retry-all-errors --max-time 20 \
-            "$APP_URL/api/v1/model-info/"
+          echo "Warming production model workers"
+          for i in 1 2 3 4; do
+            curl --fail --retry 3 --retry-delay 5 --retry-all-errors --max-time 40 \
+              "$APP_URL/api/v1/model-info/" >/dev/null
+          done
 
       - name: Notify deploy complete
         run: echo "Deployed image ${{ needs.build-and-push.outputs.image }} to ECS"
