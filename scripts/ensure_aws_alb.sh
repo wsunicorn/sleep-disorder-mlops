@@ -6,6 +6,7 @@ ECS_CLUSTER="${ECS_CLUSTER:?ECS_CLUSTER is required}"
 ECS_SERVICE="${ECS_SERVICE:?ECS_SERVICE is required}"
 CONTAINER_NAME="${CONTAINER_NAME:-sleep-portal}"
 CONTAINER_PORT="${CONTAINER_PORT:-8000}"
+ALB_IDLE_TIMEOUT_SECONDS="${ALB_IDLE_TIMEOUT_SECONDS:-300}"
 
 ALB_NAME="${PROJECT_NAME}-alb"
 ALB_SG_NAME="${PROJECT_NAME}-alb-sg"
@@ -282,6 +283,11 @@ if not_found "$ALB_ARN"; then
 fi
 
 aws elbv2 wait load-balancer-available --load-balancer-arns "$ALB_ARN"
+echo "Ensuring ALB idle timeout is ${ALB_IDLE_TIMEOUT_SECONDS}s"
+aws elbv2 modify-load-balancer-attributes \
+  --load-balancer-arn "$ALB_ARN" \
+  --attributes "Key=idle_timeout.timeout_seconds,Value=$ALB_IDLE_TIMEOUT_SECONDS" \
+  >/dev/null
 ALB_DNS=$(aws elbv2 describe-load-balancers \
   --load-balancer-arns "$ALB_ARN" \
   --query "LoadBalancers[0].DNSName" \
