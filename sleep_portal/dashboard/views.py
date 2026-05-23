@@ -19,15 +19,107 @@ _VI_NAMES = {
     "sdb":        "Rối loạn hô hấp khi ngủ",
 }
 _NORMAL_CLASSES = {"healthy"}
+_PRODUCTION_APP_URL = "http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com"
+_PRODUCTION_MODEL_STAGE = "Production"
+_PRODUCTION_MODEL_ARTIFACT_S3_URI = "s3://sleep-mlops-651709/models"
+_PRODUCTION_FEATURE_STORE_S3_URI = "s3://sleep-mlops-651709/monitoring/current"
 
 
 def _vi_name(cls: str) -> str:
     return _VI_NAMES.get(str(cls).lower(), cls)
 
 
+def _serving_status() -> dict:
+    """Return live serving metadata without breaking page rendering."""
+    try:
+        from inference.predictor import get_model_status
+
+        return get_model_status()
+    except Exception as exc:
+        return {
+            "ready": False,
+            "error": str(exc),
+            "model_name": settings.MLFLOW_MODEL_NAME,
+            "model_stage": settings.MLFLOW_MODEL_STAGE,
+            "tracking_uri": settings.MLFLOW_TRACKING_URI,
+            "feature_count": 24,
+        }
+
+
+def _find_workflow_root() -> Path | None:
+    """Find .github/workflows in local checkout; production image may not include it."""
+    candidates = [
+        Path(settings.BASE_DIR).parent / ".github" / "workflows",
+        Path(settings.BASE_DIR) / ".github" / "workflows",
+        Path.cwd() / ".github" / "workflows",
+        Path.cwd().parent / ".github" / "workflows",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _workflow_ready(workflow_root: Path | None, filename: str) -> bool:
+    """Production images do not copy .github, but the workflows exist in the repo."""
+    if workflow_root is not None:
+        return (workflow_root / filename).exists()
+    return not settings.DEBUG
+
+
+def _production_value(value: str | None, fallback: str) -> str:
+    value = str(value or "").strip()
+    if not value or value.lower() in {"none", "mlruns"}:
+        return fallback
+    return value
+
+
+def _display_context(model_status: dict) -> dict:
+    """Values shown on the dashboard should point to the production deployment."""
+    public_app_url = _production_value(
+        getattr(settings, "PUBLIC_APP_URL", ""),
+        _PRODUCTION_APP_URL,
+    )
+    tracking_uri = _production_value(
+        model_status.get("tracking_uri") or getattr(settings, "MLFLOW_TRACKING_URI", ""),
+        f"{public_app_url}:5000",
+    )
+    if not tracking_uri.startswith(("http://", "https://")):
+        tracking_uri = f"{public_app_url}:5000"
+
+    mlflow_ui_url = _production_value(
+        getattr(settings, "MLFLOW_UI_URL", ""),
+        tracking_uri,
+    )
+    if not mlflow_ui_url.startswith(("http://", "https://")):
+        mlflow_ui_url = tracking_uri
+
+    model_stage = _production_value(
+        model_status.get("model_stage") or getattr(settings, "MLFLOW_MODEL_STAGE", ""),
+        _PRODUCTION_MODEL_STAGE,
+    )
+
+    return {
+        "public_app_url": public_app_url,
+        "display_model_stage": model_stage,
+        "display_tracking_uri": tracking_uri,
+        "mlflow_ui_url": mlflow_ui_url,
+        "display_artifact_s3_uri": _production_value(
+            getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
+            _PRODUCTION_MODEL_ARTIFACT_S3_URI,
+        ),
+        "display_feature_store_s3_uri": _production_value(
+            getattr(settings, "MLOPS_FEATURE_STORE_S3_URI", ""),
+            _PRODUCTION_FEATURE_STORE_S3_URI,
+        ),
+    }
+
+
 def dashboard_home(request):
     patients = Patient.objects.all().order_by("patient_id")
     prediction_qs = EpochPrediction.objects.select_related("patient")
+    model_status = _serving_status()
+    display = _display_context(model_status)
     total_patients = patients.count()
     total_predictions = prediction_qs.count()
     monitored_patients = prediction_qs.values("patient_id").distinct().count()
@@ -71,12 +163,20 @@ def dashboard_home(request):
             "abnormal_pct": abnormal_pct,
             "model_name": settings.MLFLOW_MODEL_NAME,
             "model_stage": settings.MLFLOW_MODEL_STAGE,
+            "model_status": model_status,
+            **display,
         },
     )
 
 
 def patient_list(request):
-    patients = Patient.objects.all().order_by("patient_id")
+    patients = (
+        Patient.objects.annotate(
+            epoch_count=Count("predictions"),
+            avg_confidence=Avg("predictions__confidence"),
+        )
+        .order_by("patient_id")
+    )
     diagnosis_counts = list(
         patients.values("diagnosis")
         .annotate(count=Count("id"))
@@ -128,21 +228,25 @@ def patient_detail(request, patient_id):
 
 def predict_page(request):
     """Dedicated inference studio — single feature vector, batch CSV, and EDF upload."""
-    try:
-        from inference.predictor import get_feature_count
-        feature_count = get_feature_count()
-    except Exception:
-        feature_count = 24
+    model_status = _serving_status()
+    display = _display_context(model_status)
+    feature_count = model_status.get("feature_count") or 24
     return render(
         request,
         "dashboard/predict.html",
-        {"expected_feature_count": feature_count},
+        {
+            "expected_feature_count": feature_count,
+            "model_status": model_status,
+            **display,
+        },
     )
 
 
 def pipeline_page(request):
     """Pipeline status — model registry, workflows, monitoring."""
-    workflow_root = Path(settings.BASE_DIR) / ".github" / "workflows"
+    workflow_root = _find_workflow_root()
+    model_status = _serving_status()
+    display = _display_context(model_status)
     return render(
         request,
         "dashboard/pipeline.html",
@@ -152,9 +256,12 @@ def pipeline_page(request):
             "tracking_uri": settings.MLFLOW_TRACKING_URI,
             "artifact_s3_uri": getattr(settings, "MODEL_ARTIFACT_S3_URI", ""),
             "feature_store_s3_uri": getattr(settings, "MLOPS_FEATURE_STORE_S3_URI", ""),
-            "monitoring_ready": (workflow_root / "monitoring.yml").exists(),
-            "retrain_ready": (workflow_root / "retrain.yml").exists(),
-            "mlflow_ready": (workflow_root / "mlflow.yml").exists(),
-            "ci_ready": (workflow_root / "ci.yml").exists(),
+            "feature_store_local_dir": getattr(settings, "MLOPS_FEATURE_STORE_LOCAL_DIR", ""),
+            "model_status": model_status,
+            **display,
+            "monitoring_ready": _workflow_ready(workflow_root, "monitoring.yml"),
+            "retrain_ready": _workflow_ready(workflow_root, "retrain.yml"),
+            "mlflow_ready": _workflow_ready(workflow_root, "mlflow.yml"),
+            "ci_ready": _workflow_ready(workflow_root, "ci.yml"),
         },
     )

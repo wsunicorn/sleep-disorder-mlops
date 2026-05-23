@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% load static %}
 
-{% block title %}Cổng Thông Tin Giấc Ngủ — Tổng quan{% endblock %}
+{% block title %}Tổng quan — Sleep Disorder MLOps{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -11,15 +11,15 @@
 <section class="hero-panel mb-4">
   <div class="row g-4 align-items-end">
     <div class="col-lg-8">
-      <span class="eyebrow">Nền tảng phát hiện rối loạn giấc ngủ</span>
-      <h1 class="hero-title">Hệ thống MLOps phân tích giấc ngủ tự động.</h1>
+      <span class="eyebrow">Bảng điều khiển vận hành</span>
+      <h1 class="hero-title">Phát hiện rối loạn giấc ngủ bằng pipeline MLOps.</h1>
       <p class="hero-copy">
-        Suy luận EEG theo thời gian thực, theo dõi bệnh nhân và tái huấn luyện tự động — tất cả trong một nơi.
+        Theo dõi dữ liệu ingest từ mô phỏng IoT, suy luận bằng model Production trong MLflow, lưu lịch sử bệnh nhân và chuẩn bị dữ liệu cho monitoring/retraining.
       </p>
       <div class="d-flex flex-wrap gap-2 mt-4">
-        <a class="btn btn-light btn-pill" href="{% url 'predict_page' %}">Chạy dự đoán</a>
-        <a class="btn btn-outline-light btn-pill" href="{% url 'patient_list' %}">Xem bệnh nhân</a>
-        <a class="btn btn-outline-light btn-pill" href="{% url 'pipeline_page' %}">Trạng thái hệ thống</a>
+        <a class="btn btn-light btn-pill" href="{% url 'predict_page' %}">Mở studio suy luận</a>
+        <a class="btn btn-outline-light btn-pill" href="{% url 'patient_list' %}">Hồ sơ bệnh nhân</a>
+        <a class="btn btn-outline-light btn-pill" href="{% url 'pipeline_page' %}">Trạng thái MLOps</a>
       </div>
     </div>
     <div class="col-lg-4">
@@ -27,12 +27,12 @@
         <div class="status-panel">
           <span class="status-label">Mô hình</span>
           <strong>{{ model_name }}</strong>
-          <span class="status-meta">Giai đoạn: {{ model_stage }}</span>
+          <span class="status-meta">Stage: {{ display_model_stage }} · {{ model_status.model_type|default:"Đang đồng bộ" }}</span>
         </div>
         <div class="status-panel">
-          <span class="status-label">Kiểm tra sức khoẻ</span>
-          <strong><a href="/api/v1/health/" target="_blank" rel="noreferrer" style="color:rgba(255,255,255,0.9)">/api/v1/health/</a></strong>
-          <span class="status-meta">Kiểm tra trực tiếp</span>
+          <span class="status-label">Trạng thái serving</span>
+          <strong>{% if model_status.ready %}Sẵn sàng{% else %}Cần kiểm tra{% endif %}</strong>
+          <span class="status-meta">{{ model_status.feature_count|default:24 }} đặc trưng · <a href="/api/v1/model-info/" target="_blank" rel="noreferrer" style="color:rgba(255,255,255,0.9)">model-info</a></span>
         </div>
       </div>
     </div>
@@ -99,12 +99,12 @@
         <div class="row text-center g-2">
           <div class="col-6">
             <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">{{ normal_count }}</div>
-            <div style="font-size:0.78rem;color:var(--ink-soft)">✅ Bình thường</div>
+            <div style="font-size:0.78rem;color:var(--ink-soft)">Bình thường</div>
             <div style="font-size:0.82rem">{{ normal_pct|floatformat:0 }}%</div>
           </div>
           <div class="col-6">
             <div style="font-size:1.5rem;font-weight:700;color:var(--danger)">{{ abnormal_count }}</div>
-            <div style="font-size:0.78rem;color:var(--ink-soft)">⚠️ Có rối loạn</div>
+            <div style="font-size:0.78rem;color:var(--ink-soft)">Có rối loạn</div>
             <div style="font-size:0.82rem">{{ abnormal_pct|floatformat:0 }}%</div>
           </div>
         </div>
@@ -125,31 +125,31 @@
       <div class="row g-3">
         <div class="col-md-6">
           <a class="ops-card ops-card-link" href="{% url 'predict_page' %}">
-            <span class="ops-icon">🔬</span>
-            <span class="ops-label">Dự đoán đơn lẻ</span>
+            <span class="ops-icon">AI</span>
+            <span class="ops-label">Suy luận</span>
             <strong>Studio Suy luận</strong>
             <p>Dán vector đặc trưng hoặc tải file CSV/EDF để dự đoán rối loạn giấc ngủ tức thì.</p>
           </a>
         </div>
         <div class="col-md-6">
           <a class="ops-card ops-card-link" href="{% url 'patient_list' %}">
-            <span class="ops-icon">👥</span>
+            <span class="ops-icon">PT</span>
             <span class="ops-label">Quản lý bệnh nhân</span>
             <strong>Danh sách bệnh nhân</strong>
-            <p>Xem tất cả bệnh nhân, lọc theo chẩn đoán và xem biểu đồ dòng thời gian epoch.</p>
+            <p>Xem hồ sơ ingest từ IoT, số epoch, độ tin cậy trung bình và biểu đồ dòng thời gian.</p>
           </a>
         </div>
         <div class="col-md-6">
           <a class="ops-card ops-card-link" href="{% url 'pipeline_page' %}">
-            <span class="ops-icon">⚙️</span>
+            <span class="ops-icon">ML</span>
             <span class="ops-label">MLOps</span>
             <strong>Trạng thái Quy trình</strong>
-            <p>Kiểm tra giai đoạn model registry, CI/CD workflows, phát hiện drift và tái huấn luyện.</p>
+            <p>Kiểm tra MLflow Registry, CI/CD, feature store, monitoring drift và vòng retrain.</p>
           </a>
         </div>
         <div class="col-md-6">
           <a class="ops-card ops-card-link" href="/api/v1/model-info/" target="_blank" rel="noreferrer">
-            <span class="ops-icon">📊</span>
+            <span class="ops-icon">API</span>
             <span class="ops-label">REST API</span>
             <strong>Thông tin mô hình</strong>
             <p>Metadata trực tiếp của model đang phục vụ: số đặc trưng, giai đoạn, sẵn sàng.</p>
@@ -180,7 +180,7 @@
       <span class="activity-meta">{{ prediction.timestamp|date:"d/m/Y H:i" }}</span>
     </article>
     {% empty %}
-    <p class="empty-state">Chưa có dự đoán nào. Dùng <a href="{% url 'predict_page' %}">Studio Suy luận</a> để bắt đầu.</p>
+    <p class="empty-state">Chưa có dự đoán nào. Có thể dùng <a href="{% url 'predict_page' %}">Studio Suy luận</a> hoặc bộ dữ liệu trong <code>demo_web_iot</code> để tạo dữ liệu demo.</p>
     {% endfor %}
   </div>
 </section>
@@ -192,7 +192,7 @@
 (function(){
   const diagLabels = [{% for item in diagnosis_breakdown %}"{{ item.vi_name }}"{% if not forloop.last %},{% endif %}{% endfor %}];
   const diagData   = [{% for item in diagnosis_breakdown %}{{ item.count }}{% if not forloop.last %},{% endif %}{% endfor %}];
-  const diagColors = ["#2a9d8f","#e76f51","#bc6c25","#264653","#f4a261","#6a0572","#457b9d"];
+  const diagColors = ["#1d8a72","#b42318","#b7791f","#1f4f8f","#6b7280","#7c3aed","#0e7490"];
   new Chart(document.getElementById("diagnosisChart"), {
     type: "doughnut",
     data: {

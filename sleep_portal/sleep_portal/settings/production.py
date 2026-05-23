@@ -10,7 +10,16 @@ SECURE_SSL_REDIRECT = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # MLflow production config
-MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+PUBLIC_APP_URL = os.environ.get(
+    "PUBLIC_APP_URL",
+    "http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com",
+)
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", f"{PUBLIC_APP_URL}:5000")
 MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
-MLFLOW_MODEL_STAGE = os.environ.get("MLFLOW_MODEL_STAGE", "None")
-MODEL_ARTIFACT_S3_URI = os.environ.get("MODEL_ARTIFACT_S3_URI", "")
+MLFLOW_MODEL_STAGE = os.environ.get("MLFLOW_MODEL_STAGE", "Production")
+MLFLOW_UI_URL = os.environ.get("MLFLOW_UI_URL", MLFLOW_TRACKING_URI)
+MODEL_ARTIFACT_S3_URI = os.environ.get("MODEL_ARTIFACT_S3_URI", "s3://sleep-mlops-651709/models")
+MLOPS_FEATURE_STORE_S3_URI = os.environ.get(
+    "MLOPS_FEATURE_STORE_S3_URI",
+    "s3://sleep-mlops-651709/monitoring/current",
+)

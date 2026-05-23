@@ -1,19 +1,36 @@
 {% extends "dashboard/base.html" %}
 
-{% block title %}Studio Suy luận — Cổng Thông Tin Giấc Ngủ{% endblock %}
+{% block title %}Studio Suy luận — Sleep Disorder MLOps{% endblock %}
 
 {% block extra_head %}
 <style>
 .predict-result-card {
-  display: none;
+  display: none !important;
   border: 2px solid var(--accent);
   border-radius: var(--radius-lg);
   padding: 1.5rem;
   text-align: center;
   background: var(--surface-strong);
 }
-.predict-result-card.visible { display: block; }
-.predict-disorder-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
+.predict-result-card.visible { display: flex !important; }
+.predict-result-card {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.predict-disorder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.5rem;
+  height: 2.2rem;
+  margin: 0 auto 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-strong);
+  color: var(--brand);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
 .predict-disorder-name {
   font-family: "Instrument Serif", serif;
   font-size: 1.8rem;
@@ -38,12 +55,45 @@
 
 {% block content %}
 <div class="page-header mb-4">
-  <span class="eyebrow">Dự đoán</span>
+  <span class="eyebrow">Suy luận production</span>
   <h1 class="hero-title" style="font-size:2rem">Studio Suy luận</h1>
   <p class="hero-copy" style="color:var(--ink-soft)">
-    Chạy dự đoán rối loạn giấc ngủ bằng vector đặc trưng, file CSV theo lô hoặc file EDF thô.
+    Chạy thử model Production bằng vector đặc trưng, CSV theo lô hoặc file EDF thô; các endpoint bên dưới dùng cùng inference service đang chạy trong Django REST API.
   </p>
 </div>
+
+<section class="section-card mb-4">
+  <div class="row g-3 align-items-stretch">
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Model</span>
+        <strong>{{ model_status.model_name|default:"sleep-disorder-classifier" }}</strong>
+        <p><span class="chip {% if model_status.ready %}chip-success{% else %}chip-danger{% endif %}">{% if model_status.ready %}Ready{% else %}Not ready{% endif %}</span></p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Stage</span>
+        <strong>{{ display_model_stage }}</strong>
+        <p>Ưu tiên MLflow Registry stage Production.</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Feature schema</span>
+        <strong>{{ expected_feature_count }} giá trị</strong>
+        <p>Chuẩn notebook CAP Sleep, cửa sổ EEG 2 giây.</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Endpoint</span>
+        <strong>/api/v1/predict/</strong>
+        <p>Hỗ trợ single row và batch tối đa 256 dòng/lần trên UI.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- Tab navigation -->
 <ul class="nav nav-pills mb-4 gap-2" id="predictTabs" role="tablist">
@@ -107,16 +157,16 @@
             </div>
             <!-- Beautiful result card -->
             <div id="single-result-card" class="predict-result-card flex-grow-1 d-flex flex-column justify-content-center">
-              <div class="predict-disorder-icon" id="res-icon">💤</div>
+              <div class="predict-disorder-icon" id="res-icon">CLS</div>
               <div class="predict-disorder-name" id="res-name">—</div>
               <div class="predict-disorder-en" id="res-en">—</div>
               <div class="predict-disorder-desc" id="res-desc"></div>
               <div class="mt-2">
-                <span id="res-cached" class="predict-cached-badge chip chip-soft" style="display:none">📦 Từ cache</span>
+                <span id="res-cached" class="predict-cached-badge chip chip-soft" style="display:none">Từ cache</span>
               </div>
             </div>
             <div id="single-error-card" class="predict-error-card">
-              <strong>⚠️ Lỗi:</strong> <span id="single-error-msg"></span>
+              <strong>Lỗi:</strong> <span id="single-error-msg"></span>
             </div>
           </div>
         </div>
@@ -240,7 +290,7 @@
             </div>
             <!-- Beautiful EDF result -->
             <div id="edf-result-card" class="predict-result-card mb-3">
-              <div class="predict-disorder-icon" id="edf-icon">📁</div>
+              <div class="predict-disorder-icon" id="edf-icon">EDF</div>
               <div class="predict-disorder-name" id="edf-name">—</div>
               <div class="predict-disorder-en" id="edf-en"></div>
               <div class="predict-disorder-desc" id="edf-desc"></div>
@@ -250,7 +300,7 @@
               <div id="edf-breakdown-list" class="mt-2"></div>
             </div>
             <div id="edf-error-card" class="predict-error-card">
-              <strong>⚠️ Lỗi:</strong> <span id="edf-error-msg"></span>
+              <strong>Lỗi:</strong> <span id="edf-error-msg"></span>
             </div>
           </div>
         </div>
@@ -258,15 +308,15 @@
 
       <!-- Pipeline diagram -->
       <div class="pipeline-diagram mt-4">
-        <span class="pipeline-step">📁 File EDF</span>
+        <span class="pipeline-step">File EDF</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">🔬 Lọc MNE</span>
+        <span class="pipeline-step">MNE bandpass</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">✂️ Epoch 2 giây</span>
+        <span class="pipeline-step">Epoch 2 giây</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">📐 {{ expected_feature_count }} đặc trưng</span>
+        <span class="pipeline-step">{{ expected_feature_count }} đặc trưng EEG</span>
         <span class="pipeline-arrow">→</span>
-        <span class="pipeline-step">🤖 LightGBM</span>
+        <span class="pipeline-step">MLflow Production model</span>
         <span class="pipeline-arrow">→</span>
         <span class="pipeline-step chip chip-soft">Dự đoán</span>
       </div>
@@ -301,6 +351,11 @@
           <pre class="result-output" style="font-size:0.78rem">curl -X POST \
   /api/v1/predict-edf/ \
   -F "file=@recording.edf"</pre>
+          <h5 class="mt-3">POST /api/v1/ingest/</h5>
+          <pre class="result-output" style="font-size:0.78rem">curl -X POST \
+  /api/v1/ingest/ \
+  -H "Content-Type: application/json" \
+  -d @demo_web_iot/ingest_patient_insomnia.json</pre>
         </div>
         <div class="col-lg-6">
           <h5>Phản hồi mẫu</h5>
@@ -316,13 +371,13 @@
             <table class="table table-theme table-sm mt-2">
               <thead><tr><th>Nhãn</th><th>Tên tiếng Việt</th><th>Mô tả</th></tr></thead>
               <tbody>
-                <tr><td><code>healthy</code></td><td>✅ Bình thường</td><td>Không có rối loạn giấc ngủ</td></tr>
-                <tr><td><code>insomnia</code></td><td>😴 Mất ngủ</td><td>Khó đi vào giấc ngủ hoặc duy trì giấc ngủ</td></tr>
-                <tr><td><code>narcolepsy</code></td><td>💤 Ngủ rũ</td><td>Buồn ngủ quá mức ban ngày</td></tr>
-                <tr><td><code>nfle</code></td><td>⚡ Động kinh thùy trán về đêm</td><td>Co giật xảy ra khi ngủ</td></tr>
-                <tr><td><code>plm</code></td><td>🦵 Cử động chân định kỳ</td><td>Cử động chân tay lặp đi lặp lại khi ngủ</td></tr>
-                <tr><td><code>rbd</code></td><td>🌀 Rối loạn hành vi REM</td><td>Thực hiện hành động trong giấc mơ REM</td></tr>
-                <tr><td><code>sdb</code></td><td>🫁 Rối loạn hô hấp khi ngủ</td><td>Ngưng thở hoặc ngáy nặng khi ngủ</td></tr>
+                <tr><td><code>healthy</code></td><td>Bình thường</td><td>Không có rối loạn giấc ngủ</td></tr>
+                <tr><td><code>insomnia</code></td><td>Mất ngủ</td><td>Khó đi vào giấc ngủ hoặc duy trì giấc ngủ</td></tr>
+                <tr><td><code>narcolepsy</code></td><td>Ngủ rũ</td><td>Buồn ngủ quá mức ban ngày</td></tr>
+                <tr><td><code>nfle</code></td><td>Động kinh thùy trán về đêm</td><td>Co giật xảy ra khi ngủ</td></tr>
+                <tr><td><code>plm</code></td><td>Cử động chân định kỳ</td><td>Cử động chân tay lặp đi lặp lại khi ngủ</td></tr>
+                <tr><td><code>rbd</code></td><td>Rối loạn hành vi REM</td><td>Thực hiện hành động trong giấc mơ REM</td></tr>
+                <tr><td><code>sdb</code></td><td>Rối loạn hô hấp khi ngủ</td><td>Ngưng thở hoặc ngáy nặng khi ngủ</td></tr>
               </tbody>
             </table>
           </div>
@@ -373,17 +428,17 @@
 
   // ── Disorder metadata ─────────────────────────────────────────────
   const DISORDER_INFO = {
-    "healthy":    { icon: "✅", vi: "Bình thường",                 en: "Healthy / No disorder",             desc: "Không phát hiện rối loạn giấc ngủ. Giấc ngủ trong giới hạn bình thường.", color: "#2a9d8f" },
-    "insomnia":   { icon: "😴", vi: "Mất ngủ",                    en: "Insomnia",                           desc: "Khó đi vào giấc ngủ hoặc duy trì giấc ngủ qua đêm.", color: "#e76f51" },
-    "narcolepsy": { icon: "💤", vi: "Ngủ rũ",                     en: "Narcolepsy",                         desc: "Buồn ngủ quá mức ban ngày, có thể kèm mất trương lực cơ đột ngột.", color: "#bc6c25" },
-    "nfle":       { icon: "⚡", vi: "Động kinh thùy trán về đêm", en: "Nocturnal Frontal Lobe Epilepsy",    desc: "Co giật xảy ra trong khi ngủ, thường ở giai đoạn NREM.", color: "#264653" },
-    "plm":        { icon: "🦵", vi: "Cử động chân định kỳ",       en: "Periodic Leg Movements",            desc: "Cử động chân tay lặp đi lặp lại gây gián đoạn giấc ngủ.", color: "#f4a261" },
-    "rbd":        { icon: "🌀", vi: "Rối loạn hành vi REM",       en: "REM Sleep Behavior Disorder",       desc: "Người bệnh thực hiện hành động trong giấc mơ REM, có thể gây thương tích.", color: "#6a0572" },
-    "sdb":        { icon: "🫁", vi: "Rối loạn hô hấp khi ngủ",   en: "Sleep-Disordered Breathing",        desc: "Ngưng thở (apnea) hoặc ngáy nặng làm giảm chất lượng giấc ngủ.", color: "#457b9d" },
+    "healthy":    { icon: "OK",   vi: "Bình thường",                 en: "Healthy / No disorder",             desc: "Không phát hiện rối loạn giấc ngủ. Giấc ngủ trong giới hạn bình thường.", color: "#1d8a72" },
+    "insomnia":   { icon: "INS",  vi: "Mất ngủ",                    en: "Insomnia",                           desc: "Khó đi vào giấc ngủ hoặc duy trì giấc ngủ qua đêm.", color: "#b42318" },
+    "narcolepsy": { icon: "NAR",  vi: "Ngủ rũ",                     en: "Narcolepsy",                         desc: "Buồn ngủ quá mức ban ngày, có thể kèm mất trương lực cơ đột ngột.", color: "#b7791f" },
+    "nfle":       { icon: "NFLE", vi: "Động kinh thùy trán về đêm", en: "Nocturnal Frontal Lobe Epilepsy",    desc: "Co giật xảy ra trong khi ngủ, thường ở giai đoạn NREM.", color: "#1f4f8f" },
+    "plm":        { icon: "PLM",  vi: "Cử động chân định kỳ",       en: "Periodic Leg Movements",            desc: "Cử động chân tay lặp đi lặp lại gây gián đoạn giấc ngủ.", color: "#6b7280" },
+    "rbd":        { icon: "RBD",  vi: "Rối loạn hành vi REM",       en: "REM Sleep Behavior Disorder",       desc: "Người bệnh thực hiện hành động trong giấc mơ REM, có thể gây thương tích.", color: "#7c3aed" },
+    "sdb":        { icon: "SDB",  vi: "Rối loạn hô hấp khi ngủ",   en: "Sleep-Disordered Breathing",        desc: "Ngưng thở (apnea) hoặc ngáy nặng làm giảm chất lượng giấc ngủ.", color: "#0e7490" },
   };
 
   function getInfo(cls) {
-    return DISORDER_INFO[String(cls).toLowerCase()] || { icon: "🔬", vi: cls, en: cls, desc: "", color: "#999" };
+    return DISORDER_INFO[String(cls).toLowerCase()] || { icon: "CLS", vi: cls, en: cls, desc: "", color: "#6b7280" };
   }
 
   function setChip(el, text, variant) {
@@ -396,7 +451,12 @@
   }
 
   // ── Single vector ─────────────────────────────────────────────────
-  const sampleFeatures = Array.from({ length: EXPECTED }, (_, i) => +((i + 1) / 10).toFixed(2));
+  const sampleFeatures = [
+    81.0077, 0.4393, 52.2067, 0.3245, 14.6557, 0.1022,
+    11.5172, 0.0871, 0.5203, 0.0060, 1.7777, 2.5400,
+    5.2055, 14.7413, 18.2589, 18.5178, 10.1262, 4.2181,
+    -0.0198, 0.0224, 0.0220, 394.6269, 0.0734, 4.2062
+  ].slice(0, EXPECTED);
   const featureInput = document.getElementById("feature-input");
   const singleStatus = document.getElementById("single-status");
   const singleCard   = document.getElementById("single-result-card");
@@ -407,7 +467,7 @@
   });
 
   document.getElementById("single-predict-btn").addEventListener("click", async () => {
-    setChip(singleStatus, "Đang xử lý…", "warning");
+    setChip(singleStatus, "Đang xử lý", "warning");
     singleCard.classList.remove("visible");
     singleErrCard.classList.remove("visible");
     try {
@@ -431,7 +491,7 @@
       const cachedBadge = document.getElementById("res-cached");
       cachedBadge.style.display = payload.cached ? "inline" : "none";
       singleCard.classList.add("visible");
-      setChip(singleStatus, payload.cached ? "📦 Từ cache" : "✅ Xong", "success");
+      setChip(singleStatus, payload.cached ? "Từ cache" : "Xong", "success");
     } catch (err) {
       document.getElementById("single-error-msg").textContent = err.message;
       singleErrCard.classList.add("visible");
@@ -466,8 +526,8 @@
 
   batchBtn.addEventListener("click", async () => {
     if (!batchRows) return;
-    setChip(batchStatus, "Đang xử lý…", "warning");
-    batchBody.innerHTML = '<tr><td colspan="3" class="text-muted">Đang xử lý…</td></tr>';
+    setChip(batchStatus, "Đang xử lý", "warning");
+    batchBody.innerHTML = '<tr><td colspan="3" class="text-muted">Đang xử lý</td></tr>';
     try {
       const invalid = batchRows.find(r => r.length !== EXPECTED || r.some(isNaN));
       if (invalid) throw new Error("Mỗi hàng phải có đúng " + EXPECTED + " cột số.");
@@ -489,7 +549,7 @@
         return '<tr><td>' + (i+1) + '</td>'
           + '<td><code>' + cls + '</code></td>'
           + '<td><span style="display:inline-flex;align-items:center;gap:4px">'
-          + '<span style="font-size:1.1rem">' + info.icon + '</span>'
+          + '<span class="ops-icon" style="margin:0">' + info.icon + '</span>'
           + '<strong style="color:' + info.color + '">' + info.vi + '</strong>'
           + '</span></td></tr>';
       }).join("");
@@ -532,7 +592,7 @@
   edfBtn.addEventListener("click", async () => {
     const file = edfFile.files[0];
     if (!file) return;
-    setChip(edfStatus, "Đang xử lý…", "warning");
+    setChip(edfStatus, "Đang xử lý", "warning");
     edfProgress.classList.remove("d-none");
     edfCard.classList.remove("visible");
     edfErrCard.classList.remove("visible");
@@ -562,7 +622,7 @@
             const inf = getInfo(k);
             const pct = ((v/total)*100).toFixed(1);
             return '<div class="d-flex align-items-center gap-2 mb-1" style="font-size:0.85rem">'
-              + '<span style="font-size:1rem">' + inf.icon + '</span>'
+              + '<span class="ops-icon" style="margin:0">' + inf.icon + '</span>'
               + '<span style="min-width:140px;color:' + inf.color + ';font-weight:600">' + inf.vi + '</span>'
               + '<div style="flex:1;height:8px;background:#e0e0e0;border-radius:999px">'
               + '<div style="width:' + pct + '%;height:100%;background:' + inf.color + ';border-radius:999px"></div>'
@@ -588,7 +648,7 @@
   const jsonOutput = document.getElementById("json-output");
 
   document.getElementById("json-send-btn").addEventListener("click", async () => {
-    setChip(jsonStatus, "Đang gửi…", "warning");
+    setChip(jsonStatus, "Đang gửi", "warning");
     try {
       const body = JSON.parse(document.getElementById("json-editor").value);
       const res = await fetch(PREDICT_URL, {
@@ -599,7 +659,7 @@
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || JSON.stringify(payload));
       jsonOutput.textContent = JSON.stringify(payload, null, 2);
-      setChip(jsonStatus, "✅ Xong", "success");
+      setChip(jsonStatus, "Xong", "success");
     } catch (err) {
       jsonOutput.textContent = JSON.stringify({ error: err.message }, null, 2);
       setChip(jsonStatus, "Lỗi", "danger");

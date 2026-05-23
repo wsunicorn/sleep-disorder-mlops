@@ -1,6 +1,6 @@
 {% extends "dashboard/base.html" %}
 
-{% block title %}Bệnh nhân {{ patient.patient_id }}{% endblock %}
+{% block title %}Bệnh nhân {{ patient.patient_id }} — Sleep Disorder MLOps{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -129,7 +129,7 @@
 <script>
 (function(){
   const CLASS_MAP = {"healthy":0,"insomnia":1,"narcolepsy":2,"nfle":3,"plm":4,"rbd":5,"sdb":6};
-  const CLASS_COLORS = {"healthy":"#2a9d8f","insomnia":"#e76f51","narcolepsy":"#bc6c25","nfle":"#264653","plm":"#f4a261","rbd":"#6a0572","sdb":"#457b9d"};
+  const CLASS_COLORS = {"healthy":"#1d8a72","insomnia":"#b42318","narcolepsy":"#b7791f","nfle":"#1f4f8f","plm":"#6b7280","rbd":"#7c3aed","sdb":"#0e7490"};
   const CLASS_VI = {"healthy":"Bình thường","insomnia":"Mất ngủ","narcolepsy":"Ngủ rũ","nfle":"ĐK thùy trán","plm":"Cử động chân","rbd":"Rối loạn REM","sdb":"Rối loạn hô hấp"};
 
   const epochData = {{ chart_data|safe }};

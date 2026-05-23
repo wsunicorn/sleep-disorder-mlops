@@ -31,6 +31,8 @@ COPY feature_engineering/ ./feature_engineering/
 COPY training/ ./training/
 COPY monitoring/ ./monitoring/
 COPY models/ ./models/
+COPY .github/ ./.github/
+COPY demo_web_iot/ ./demo_web_iot/
 COPY params.yaml ./
 
 ENV DJANGO_SETTINGS_MODULE=sleep_portal.settings.production

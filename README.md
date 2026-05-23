@@ -69,6 +69,9 @@ Xác minh production gần nhất ngày 22/05/2026:
 - MLflow UI port `5000`: trả HTTP `200`.
 - MLflow experiment `sleep-disorder-kaggle`: có các run `XGBoost`, `LightGBM`, `RandomForest`.
 - MLflow Model Registry `sleep-disorder-classifier`: có version `1`, stage `Production`, status `READY`, run id `4f50ad8b6ac84a5582f0cb8886e4fd18`.
+- Giao diện dashboard đã được chỉnh theo hướng vận hành production: Tổng quan, Hồ sơ bệnh nhân, Studio Suy luận và MLOps Pipeline.
+- Thư mục `demo_web_iot/` chứa payload JSON, CSV batch và script PowerShell để demo từng phần của website.
+- `iot_simulation/simulator.py` hiện bám theo luồng production REST: EDF -> 24 feature -> `/api/v1/predict/` -> `/api/v1/ingest/`.
 
 ## Mục lục
 
@@ -455,18 +458,19 @@ Giao diện nằm trong `sleep_portal/dashboard/templates/dashboard/`, sử dụ
 
 | Giao diện             | File                    | Mục đích                                                                                            |
 | ---------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------ |
-| Tổng quan             | `home.html`           | Hiển thị KPI: số bệnh nhân, số epoch dự đoán, phân bố chẩn đoán, hoạt động gần đây |
-| Danh sách bệnh nhân | `patient_list.html`   | Lọc/xem các bệnh nhân đã ingest                                                                  |
-| Chi tiết bệnh nhân  | `patient_detail.html` | Xem timeline dự đoán theo epoch và thống kê từng bệnh nhân                                    |
-| Dự đoán             | `predict.html`        | Cho phép nhập feature, dùng sample JSON, hoặc upload EDF                                           |
-| Quy trình             | `pipeline.html`       | Tóm tắt model registry, CI/CD, monitoring, retrain và kiến trúc                                   |
+| Tổng quan             | `home.html`           | Hiển thị KPI vận hành, trạng thái model serving, phân bố chẩn đoán và hoạt động gần đây |
+| Hồ sơ bệnh nhân       | `patient_list.html`   | Tìm kiếm/xem bệnh nhân đã ingest, số epoch và độ tin cậy trung bình                    |
+| Chi tiết bệnh nhân    | `patient_detail.html` | Xem timeline dự đoán theo epoch và phân bố lớp của từng bệnh nhân                     |
+| Studio Suy luận       | `predict.html`        | Chạy vector đơn, CSV batch, EDF thô và xem ví dụ REST API                              |
+| MLOps Pipeline        | `pipeline.html`       | Tóm tắt 6 lớp production: IoT, feature/training, MLflow, serving, CI/CD, monitoring    |
 
 Nguyên tắc thiết kế:
 
 - Dashboard ưu tiên đọc nhanh số liệu, không làm như landing page.
 - Các chức năng kỹ thuật như API/model/pipeline được gom vào trang riêng để dễ demo.
-- Trang dự đoán cho phép thử nhanh cả hai luồng: batch feature và EDF.
-- Trang bệnh nhân phục vụ luồng IoT: sau khi simulator ingest, dữ liệu xuất hiện trên dashboard.
+- Trang dự đoán cho phép thử nhanh ba luồng: vector feature, batch CSV và EDF.
+- Trang MLOps Pipeline chỉ mô tả các thành phần project đang thật sự dùng, trong đó orchestration production là GitHub Actions.
+- Trang bệnh nhân phục vụ luồng IoT: sau khi script demo hoặc simulator ingest, dữ liệu xuất hiện trên dashboard.
 
 ## 1.10. Thiết kế giải thuật
 
@@ -723,16 +727,17 @@ File chính:
 Kết quả:
 
 - Trang tổng quan KPI.
-- Trang danh sách bệnh nhân.
+- Trang hồ sơ bệnh nhân có tìm kiếm nhanh, số epoch và độ tin cậy trung bình.
 - Trang chi tiết bệnh nhân theo epoch.
-- Trang dự đoán feature/EDF.
-- Trang trạng thái pipeline MLOps.
+- Trang Studio Suy luận cho vector đơn, CSV batch, EDF và ví dụ REST API.
+- Trang MLOps Pipeline phản ánh đúng kiến trúc hiện tại: Django/DRF, MLflow, S3, RDS, ECS, ALB, GitHub Actions và Evidently.
 
 Ý nghĩa:
 
 - Người demo có thể thấy hệ thống hoạt động mà không cần gọi API thủ công.
 - Kết quả từ simulator có thể được ghi vào DB và xem lại theo bệnh nhân.
 - Giao diện giúp giải thích kiến trúc MLOps cho người xem.
+- Bộ dữ liệu `demo_web_iot/` giúp demo từng phần ngay cả khi không có file EDF lớn.
 
 ### 2.2.5. Chức năng mô phỏng IoT
 
@@ -742,12 +747,14 @@ File chính:
 - `iot_simulation/multi_patient_demo.py`
 - `iot_simulation/simulator.py`
 - `iot_simulation/subscriber.py`
+- `demo_web_iot/`
 
 Kết quả:
 
-- Có thể sinh dữ liệu mô phỏng hoặc lấy thống kê từ `feature_stats.json`.
-- Gọi `/api/v1/predict/` để nhận nhãn.
-- Gọi `/api/v1/ingest/` để lưu bệnh nhân/epoch.
+- Có thể sinh dữ liệu mô phỏng từ thống kê `feature_stats.json`, chạy demo nhiều bệnh nhân hoặc đọc EDF thật.
+- `iot_simulation/simulator.py` đọc EDF, trích 24 feature chuẩn notebook, gọi `/api/v1/predict/`, rồi gửi batch vào `/api/v1/ingest/`.
+- `demo_web_iot/` cung cấp JSON/CSV cố định để kiểm thử UI và API trong lúc demo.
+- `/api/v1/ingest/` lưu bệnh nhân/epoch vào PostgreSQL và ghi feature batch thành Parquet cho monitoring/retraining.
 
 Ý nghĩa:
 
@@ -993,6 +1000,48 @@ Sau đó mở:
 - Health check: `http://127.0.0.1:8000/api/v1/health/`
 - Model info: `http://127.0.0.1:8000/api/v1/model-info/`
 
+## Demo nhanh giao diện và API bằng dữ liệu IoT
+
+Thư mục `demo_web_iot/` chứa bộ dữ liệu nhỏ để test từng phần của website khi demo:
+
+- `predict_single_healthy.json`: gọi thử `/api/v1/predict/` với 1 vector 24 đặc trưng.
+- `predict_batch.csv`: tải lên tab "CSV theo lô" trong Studio Suy luận.
+- `ingest_patient_*.json`: tạo bệnh nhân và epoch demo qua `/api/v1/ingest/`.
+- `run_demo_rest.ps1`: chạy lần lượt health, model-info, predict single, predict batch và ingest.
+
+Chạy với server local:
+
+```powershell
+.\demo_web_iot\run_demo_rest.ps1 -BaseUrl http://127.0.0.1:8000
+```
+
+Chạy với production ALB:
+
+```powershell
+.\demo_web_iot\run_demo_rest.ps1 -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
+```
+
+Sau khi script chạy xong, mở:
+
+- `/` để xem KPI tổng quan tăng lên.
+- `/patients/` để xem hồ sơ `demo-iot-*`.
+- `/patients/demo-iot-mixed-001/` để trình bày timeline epoch nhiều nhãn.
+- `/pipeline/` để giải thích các lớp MLOps production.
+
+Nếu muốn demo từ EDF thật theo kiểu thiết bị IoT gửi dữ liệu về hệ thống:
+
+```powershell
+python iot_simulation/simulator.py `
+  --edf data\raw\your_recording.edf `
+  --api-base http://127.0.0.1:8000 `
+  --patient-id demo-edf-001 `
+  --diagnosis insomnia `
+  --age 43 `
+  --gender M `
+  --max-epochs 32 `
+  --batch-size 8
+```
+
 ## Chạy Docker local
 
 ```powershell
@@ -1183,26 +1232,38 @@ Mục tiêu demo: chứng minh hệ thống đi được trọn vòng đời MLO
    - Mở `/api/v1/model-info/` để chứng minh model đã sẵn sàng, có 24 feature, có artifact sync S3 và có MLflow stage.
 4. Demo dự đoán bằng feature:
 
-   - Vào trang Predict trên giao diện, nhập hoặc dán một batch 24 feature.
-   - Hoặc gọi API:
+   - Vào trang Studio Suy luận.
+   - Tab "Vector đơn lẻ": bấm "Tải dữ liệu mẫu" hoặc dùng `demo_web_iot/predict_single_healthy.json`.
+   - Tab "CSV theo lô": tải file `demo_web_iot/predict_batch.csv`.
+   - Hoặc gọi API bằng payload demo:
      ```powershell
-     curl -X POST `
-       http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/predict/ `
-       -H "Content-Type: application/json" `
-       -d "{\"features\":[[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4]]}"
+     Invoke-RestMethod -Method Post `
+       -Uri http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com/api/v1/predict/ `
+       -ContentType "application/json" `
+       -Body (Get-Content -Raw demo_web_iot\predict_single_healthy.json)
      ```
    - Giải thích rằng production serving sẽ ưu tiên MLflow Registry, nếu lỗi sẽ fallback `model.pkl` từ S3.
 5. Demo luồng IoT nhiều bệnh nhân:
 
+   Cách nhanh nhất là dùng bộ dữ liệu demo cố định:
+
    ```powershell
-   python iot_simulation/multi_patient_demo.py `
-     --url http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
-     --epochs 20 `
-     --batch-size 5 `
-     --workers 3
+   .\demo_web_iot\run_demo_rest.ps1 `
+     -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
    ```
 
-   - Script lấy thống kê feature, sinh epoch mô phỏng, gọi `/predict/`, rồi gửi kết quả vào `/ingest/`.
+   Nếu muốn demo từ EDF thật, dùng simulator REST:
+
+   ```powershell
+   python iot_simulation/simulator.py `
+     --edf data\raw\your_recording.edf `
+     --api-base http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
+     --patient-id demo-edf-001 `
+     --diagnosis insomnia `
+     --max-epochs 32
+   ```
+
+   - Script demo gọi `/predict/`, rồi gửi kết quả vào `/ingest/`.
    - `/ingest/` lưu bệnh nhân và epoch vào PostgreSQL, đồng thời ghi feature batch ra `s3://sleep-mlops-651709/monitoring/current`.
 6. Quay lại dashboard:
 

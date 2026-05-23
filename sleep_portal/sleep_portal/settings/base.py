@@ -133,9 +133,17 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 ).split(",")
 
 # MLflow
+PUBLIC_APP_URL = os.environ.get(
+    "PUBLIC_APP_URL",
+    "http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com",
+)
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
 MLFLOW_MODEL_STAGE = os.environ.get("MLFLOW_MODEL_STAGE", "Production")
+MLFLOW_UI_URL = os.environ.get(
+    "MLFLOW_UI_URL",
+    MLFLOW_TRACKING_URI if MLFLOW_TRACKING_URI.startswith(("http://", "https://")) else f"{PUBLIC_APP_URL}:5000",
+)
 _DEFAULT_MODEL_ARTIFACT_DIR = (
     BASE_DIR / "models"
     if (BASE_DIR / "models").exists()

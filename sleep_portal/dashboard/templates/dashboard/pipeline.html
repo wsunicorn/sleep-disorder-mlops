@@ -1,341 +1,283 @@
 {% extends "dashboard/base.html" %}
 
-{% block title %}Trạng thái Quy trình — Cổng Thông Tin Giấc Ngủ{% endblock %}
+{% block title %}MLOps — Sleep Disorder MLOps{% endblock %}
 
 {% block content %}
 <div class="page-header mb-4">
-  <span class="eyebrow">MLOps</span>
-  <h1 class="hero-title" style="font-size:2rem">Trạng thái Quy trình</h1>
+  <span class="eyebrow">Trạng thái production</span>
+  <h1 class="hero-title" style="font-size:2rem">MLOps Pipeline</h1>
   <p class="hero-copy" style="color:var(--ink-soft)">
-    Model registry, CI/CD workflows, phát hiện drift và toàn bộ kiến trúc 4 tầng.
+    Trang này phản ánh các thành phần đang dùng thật trong project: Django REST API, MLflow Registry,
+    S3 feature store, GitHub Actions, Docker/ECR, ECS Fargate, ALB và monitoring bằng Evidently.
   </p>
 </div>
 
-<!-- Model registry -->
 <section class="section-card mb-4">
   <div class="section-heading">
     <div>
-      <span class="eyebrow">MLflow Registry</span>
-      <h3>Mô hình đang hoạt động</h3>
+      <span class="eyebrow">Serving model</span>
+      <h3>Mô hình đang phục vụ</h3>
     </div>
-    <a class="btn btn-outline-dark btn-sm btn-pill" href="/api/v1/model-info/" target="_blank" rel="noreferrer">Metadata trực tiếp</a>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-dark btn-sm btn-pill" href="/api/v1/model-info/" target="_blank" rel="noreferrer">Metadata</a>
+      <a class="btn btn-outline-dark btn-sm btn-pill" href="/api/v1/health/" target="_blank" rel="noreferrer">Health</a>
+      <a class="btn btn-accent btn-sm btn-pill" href="{{ mlflow_ui_url }}" target="_blank" rel="noreferrer">Mở MLflow UI</a>
+    </div>
   </div>
   <div class="row g-3">
-    <div class="col-md-4">
-      <div class="ops-card">
-        <span class="ops-label">Tên mô hình</span>
-        <strong>{{ model_name }}</strong>
-        <p>Đã đăng ký trong MLflow model registry.</p>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="ops-card">
-        <span class="ops-label">Giai đoạn phục vụ</span>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Trạng thái</span>
         <strong>
-          <span class="chip {% if model_stage == 'Production' %}chip-success{% elif model_stage == 'Staging' %}chip-warning{% else %}chip-soft{% endif %}">
-            {{ model_stage }}
+          <span class="chip {% if model_status.ready %}chip-success{% else %}chip-danger{% endif %}">
+            {% if model_status.ready %}Ready{% else %}Not ready{% endif %}
           </span>
         </strong>
-        <p>Giai đoạn hiện tại trong vòng đời MLflow.</p>
+        <p>{% if model_status.error %}{{ model_status.error }}{% else %}Model đã load được cho API suy luận.{% endif %}</p>
       </div>
     </div>
-    <div class="col-md-4">
-      <div class="ops-card">
-        <span class="ops-label">Tracking URI</span>
-        <strong style="word-break:break-all;font-size:0.82rem">{{ tracking_uri }}</strong>
-        <p>Backend lưu trữ MLflow.</p>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Registry</span>
+        <strong>{{ model_name }}</strong>
+        <p>Stage phục vụ: <span class="chip {% if display_model_stage == 'Production' %}chip-success{% else %}chip-warning{% endif %}">{{ display_model_stage }}</span></p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Feature schema</span>
+        <strong>{{ model_status.feature_count|default:24 }} đặc trưng</strong>
+        <p>Bám theo notebook chuẩn <code>kaggle_cap_training.ipynb</code>.</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <span class="ops-label">Model type</span>
+        <strong>{{ model_status.model_type|default:"Chưa xác định" }}</strong>
+        <p>Ưu tiên load từ MLflow Registry, fallback artifact S3 khi cần.</p>
       </div>
     </div>
     <div class="col-md-6">
-      <div class="ops-card">
-        <span class="ops-label">Model artifact S3</span>
-        <strong style="word-break:break-all;font-size:0.82rem">{{ artifact_s3_uri|default:"Chưa cấu hình" }}</strong>
-        <p>Nơi CI/CD và ứng dụng lấy model mới sau retrain.</p>
+      <div class="ops-card h-100">
+        <span class="ops-label">MLflow Tracking URI</span>
+        <strong style="word-break:break-all;font-size:0.86rem">{{ display_tracking_uri }}</strong>
+        <p>MLflow server production chạy như một service riêng trên ECS, dùng RDS làm backend store và S3 làm artifact store.</p>
       </div>
     </div>
     <div class="col-md-6">
-      <div class="ops-card">
+      <div class="ops-card h-100">
         <span class="ops-label">Feature store hiện tại</span>
-        <strong style="word-break:break-all;font-size:0.82rem">{{ feature_store_s3_uri|default:"Chưa cấu hình" }}</strong>
-        <p>Dữ liệu mới được ingest để monitoring và retrain sử dụng.</p>
+        <strong style="word-break:break-all;font-size:0.86rem">{{ display_feature_store_s3_uri }}</strong>
+        <p>Dữ liệu ingest mới được ghi thành Parquet để monitoring và retraining đọc lại.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Workflows -->
 <section class="section-card mb-4">
   <div class="section-heading">
     <div>
       <span class="eyebrow">GitHub Actions</span>
-      <h3>CI/CD Workflows</h3>
+      <h3>Tự động hóa CI/CD và MLOps</h3>
     </div>
   </div>
   <div class="row g-3">
     <div class="col-md-3">
-      <div class="ops-card">
+      <div class="ops-card h-100">
         <div class="d-flex justify-content-between align-items-start mb-1">
-          <span class="ops-label">CI pipeline</span>
-          <span class="chip {% if ci_ready %}chip-success{% else %}chip-danger{% endif %}">
-            {% if ci_ready %}Sẵn sàng{% else %}Thiếu{% endif %}
-          </span>
+          <span class="ops-label">CI/CD</span>
+          <span class="chip {% if ci_ready %}chip-success{% else %}chip-danger{% endif %}">{% if ci_ready %}Có{% else %}Thiếu{% endif %}</span>
         </div>
         <strong>ci.yml</strong>
-        <p>Test → Build Docker → Push ECR → Deploy ECS + migrate mỗi lần push lên main.</p>
+        <p>Pytest, build Docker image, push ECR, deploy ECS, chạy migrate và smoke test qua ALB.</p>
       </div>
     </div>
     <div class="col-md-3">
-      <div class="ops-card">
+      <div class="ops-card h-100">
         <div class="d-flex justify-content-between align-items-start mb-1">
-          <span class="ops-label">Phát hiện drift</span>
-          <span class="chip {% if monitoring_ready %}chip-success{% else %}chip-danger{% endif %}">
-            {% if monitoring_ready %}Sẵn sàng{% else %}Thiếu{% endif %}
-          </span>
-        </div>
-        <strong>monitoring.yml</strong>
-        <p>Kiểm tra drift hàng tuần (Thứ 2 lúc 03:00 UTC) qua Evidently AI. Cũng có thể kích hoạt thủ công.</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="ops-card">
-        <div class="d-flex justify-content-between align-items-start mb-1">
-          <span class="ops-label">Tái huấn luyện</span>
-          <span class="chip {% if retrain_ready %}chip-success{% else %}chip-danger{% endif %}">
-            {% if retrain_ready %}Sẵn sàng{% else %}Thiếu{% endif %}
-          </span>
-        </div>
-        <strong>retrain.yml</strong>
-        <p>Train lại trên GitHub Actions, log vào MLflow, promote model khi F1 vượt ngưỡng rồi kích hoạt CI/CD redeploy.</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="ops-card">
-        <div class="d-flex justify-content-between align-items-start mb-1">
-          <span class="ops-label">MLflow server</span>
-          <span class="chip {% if mlflow_ready %}chip-success{% else %}chip-danger{% endif %}">
-            {% if mlflow_ready %}Sẵn sàng{% else %}Thiếu{% endif %}
-          </span>
+          <span class="ops-label">MLflow</span>
+          <span class="chip {% if mlflow_ready %}chip-success{% else %}chip-danger{% endif %}">{% if mlflow_ready %}Có{% else %}Thiếu{% endif %}</span>
         </div>
         <strong>mlflow.yml</strong>
-        <p>Build image MLflow, deploy service riêng trên ECS, dùng RDS làm backend và S3 làm artifact store.</p>
+        <p>Triển khai MLflow tracking server production để xem run, metric, artifact và Model Registry.</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <div class="d-flex justify-content-between align-items-start mb-1">
+          <span class="ops-label">Monitoring</span>
+          <span class="chip {% if monitoring_ready %}chip-success{% else %}chip-danger{% endif %}">{% if monitoring_ready %}Có{% else %}Thiếu{% endif %}</span>
+        </div>
+        <strong>monitoring.yml</strong>
+        <p>So sánh reference/current features bằng Evidently; có lịch chạy và có thể chạy thủ công khi demo.</p>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="ops-card h-100">
+        <div class="d-flex justify-content-between align-items-start mb-1">
+          <span class="ops-label">Retrain</span>
+          <span class="chip {% if retrain_ready %}chip-success{% else %}chip-danger{% endif %}">{% if retrain_ready %}Có{% else %}Thiếu{% endif %}</span>
+        </div>
+        <strong>retrain.yml</strong>
+        <p>Train lại, log MLflow, kiểm tra weighted F1, promote Production và kích hoạt redeploy khi đạt ngưỡng.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Architecture overview -->
 <section class="section-card mb-4">
   <div class="section-heading">
     <div>
-      <span class="eyebrow">Kiến trúc hệ thống</span>
-      <h3>Quy trình MLOps 4 tầng</h3>
+      <span class="eyebrow">Kiến trúc vận hành</span>
+      <h3>Luồng end-to-end hiện tại</h3>
     </div>
   </div>
 
   <div class="arch-layers">
-
-    <!-- Layer 1 -->
     <div class="arch-layer arch-layer-1">
       <div class="arch-layer-header">
-        <span class="arch-badge">Tầng 1</span>
-        <strong>Mô phỏng IoT</strong>
+        <span class="arch-badge">Lớp 1</span>
+        <strong>Data Source &amp; IoT Simulation</strong>
       </div>
       <div class="arch-flow">
-        <div class="arch-node">
-          <span class="arch-icon">🐍</span>
-          <span>Python Simulator</span>
-          <small>Phát lại epoch EDF</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">CAP</span><span>Balanced CAP</span><small>EDF/CSV EEG</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">📡</span>
-          <span>HTTP/REST</span>
-          <small>POST /api/v1/ingest/</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">SIM</span><span>Python demo IoT</span><small>demo_web_iot</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">🐘</span>
-          <span>RDS PostgreSQL</span>
-          <small>Lưu dữ liệu bệnh nhân</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">API</span><span>/api/v1/ingest/</span><small>Lưu patient + epoch</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">S3</span><span>Feature Store</span><small>Parquet batch</small></div>
       </div>
     </div>
 
-    <!-- Layer 2 -->
     <div class="arch-layer arch-layer-2">
       <div class="arch-layer-header">
-        <span class="arch-badge">Tầng 2</span>
-        <strong>Dữ liệu &amp; Huấn luyện</strong>
+        <span class="arch-badge">Lớp 2</span>
+        <strong>Feature Engineering &amp; Training</strong>
       </div>
       <div class="arch-flow">
-        <div class="arch-node">
-          <span class="arch-icon">🧪</span>
-          <span>MNE-Python</span>
-          <small>Lọc băng thông / epoch 2s</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">MNE</span><span>Tiền xử lý EEG</span><small>Bandpass + epoch 2s</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">📐</span>
-          <span>Trích xuất đặc trưng</span>
-          <small>24 đặc trưng phổ + thời gian</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">24</span><span>Feature builder</span><small>Power, entropy, Hjorth</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">📦</span>
-          <span>DVC + S3</span>
-          <small>Quản lý phiên bản dữ liệu</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">ML</span><span>Train models</span><small>XGBoost/LightGBM/RF</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">🏋️</span>
-          <span>LightGBM</span>
-          <small>Huấn luyện phân loại</small>
-        </div>
-        <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">📊</span>
-          <span>MLflow Registry</span>
-          <small>Quản lý phiên bản mô hình</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">ART</span><span>Artifacts</span><small>model, encoder, metadata</small></div>
       </div>
     </div>
 
-    <!-- Layer 3 -->
     <div class="arch-layer arch-layer-3">
       <div class="arch-layer-header">
-        <span class="arch-badge">Tầng 3</span>
-        <strong>Phục vụ &amp; Triển khai</strong>
+        <span class="arch-badge">Lớp 3</span>
+        <strong>MLflow Model Management</strong>
       </div>
       <div class="arch-flow">
-        <div class="arch-node">
-          <span class="arch-icon">⚙️</span>
-          <span>GitHub Actions</span>
-          <small>CI/CD</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">MLF</span><span>Tracking Server</span><small>ECS Fargate</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">🐳</span>
-          <span>Docker + ECR</span>
-          <small>Registry ảnh</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">RDS</span><span>Backend Store</span><small>PostgreSQL</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">☁️</span>
-          <span>ECS Fargate</span>
-          <small>Container không máy chủ</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">S3</span><span>Artifact Store</span><small>ML artifacts</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">⚖️</span>
-          <span>AWS ALB</span>
-          <small>Cân bằng tải</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">PROD</span><span>Registry Stage</span><small>Production</small></div>
       </div>
     </div>
 
-    <!-- Layer 4 -->
     <div class="arch-layer arch-layer-4">
       <div class="arch-layer-header">
-        <span class="arch-badge">Tầng 4</span>
-        <strong>Giám sát &amp; Tái huấn luyện</strong>
+        <span class="arch-badge">Lớp 4</span>
+        <strong>Serving &amp; Web Application</strong>
       </div>
       <div class="arch-flow">
-        <div class="arch-node">
-          <span class="arch-icon">👁️</span>
-          <span>CloudWatch</span>
-          <small>Metrics + Logs</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">ALB</span><span>AWS ALB</span><small>Public endpoint</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">📉</span>
-          <span>Evidently AI</span>
-          <small>Phát hiện data drift</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">ECS</span><span>Django/DRF</span><small>Web + API</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node">
-          <span class="arch-icon">🔄</span>
-          <span>Prefect</span>
-          <small>Điều phối tái huấn luyện</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">INF</span><span>Inference service</span><small>Registry + fallback</small></div>
         <span class="arch-arrow">→</span>
-        <div class="arch-node arch-loop-node">
-          <span class="arch-icon">📋</span>
-          <span>Quy tắc Promote</span>
-          <small>Kiểm tra ngưỡng F1</small>
-        </div>
+        <div class="arch-node"><span class="ops-icon">PG</span><span>PostgreSQL</span><small>Patient history</small></div>
       </div>
-      <p class="arch-loop-label">↑ Vòng lặp tái huấn luyện tự động quay lại Tầng 2 khi phát hiện drift</p>
     </div>
 
+    <div class="arch-layer arch-layer-2">
+      <div class="arch-layer-header">
+        <span class="arch-badge">Lớp 5</span>
+        <strong>CI/CD Deployment</strong>
+      </div>
+      <div class="arch-flow">
+        <div class="arch-node"><span class="ops-icon">GIT</span><span>Push main</span><small>Source control</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">ACT</span><span>GitHub Actions</span><small>Test/build/deploy</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">ECR</span><span>Image registry</span><small>Docker image</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">CHK</span><span>Smoke test</span><small>health/model-info</small></div>
+      </div>
+    </div>
+
+    <div class="arch-layer arch-layer-3">
+      <div class="arch-layer-header">
+        <span class="arch-badge">Lớp 6</span>
+        <strong>Monitoring &amp; Retraining</strong>
+      </div>
+      <div class="arch-flow">
+        <div class="arch-node"><span class="ops-icon">REF</span><span>Reference data</span><small>S3 features</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">CUR</span><span>Current data</span><small>Ingest batches</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">EVI</span><span>Evidently</span><small>Drift report</small></div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-node"><span class="ops-icon">RUN</span><span>Retrain workflow</span><small>Promote + redeploy</small></div>
+      </div>
+      <p class="arch-loop-label">Vòng lặp tự động: Production app → Feature store → Drift monitoring → Retraining → MLflow Registry → CI/CD redeploy → Production app.</p>
+    </div>
   </div>
 </section>
 
-<!-- Endpoint reference -->
 <section class="section-card">
   <div class="section-heading">
     <div>
       <span class="eyebrow">REST API</span>
-      <h3>Danh sách endpoint</h3>
+      <h3>Endpoint phục vụ demo</h3>
     </div>
   </div>
   <div class="table-responsive">
     <table class="table table-theme align-middle">
       <thead>
-        <tr><th>Phương thức</th><th>Endpoint</th><th>Mô tả</th><th>Trạng thái</th></tr>
+        <tr><th>Phương thức</th><th>Endpoint</th><th>Mục đích</th><th>Demo</th></tr>
       </thead>
       <tbody>
         <tr>
           <td><span class="chip chip-soft">GET</span></td>
           <td><a href="/api/v1/health/" target="_blank">/api/v1/health/</a></td>
-          <td>Heartbeat dịch vụ — trả về <code>{"status":"ok"}</code></td>
-          <td><span class="chip chip-success">Hoạt động</span></td>
+          <td>Kiểm tra service còn sống.</td>
+          <td><span class="chip chip-success">Smoke test</span></td>
         </tr>
         <tr>
           <td><span class="chip chip-soft">GET</span></td>
           <td><a href="/api/v1/model-info/" target="_blank">/api/v1/model-info/</a></td>
-          <td>Metadata mô hình: tên, giai đoạn, số đặc trưng, sẵn sàng</td>
-          <td><span class="chip chip-success">Hoạt động</span></td>
+          <td>Trạng thái model, feature count, MLflow URI và fallback artifact.</td>
+          <td><span class="chip chip-success">Model status</span></td>
         </tr>
         <tr>
           <td><span class="chip chip-soft">POST</span></td>
           <td>/api/v1/predict/</td>
-          <td>Dự đoán theo lô — body: <code>{"features": [[…24 floats…]]}</code></td>
-          <td><span class="chip chip-success">Hoạt động</span></td>
+          <td>Dự đoán một hoặc nhiều vector 24 đặc trưng.</td>
+          <td><code>demo_web_iot/predict_single_healthy.json</code></td>
         </tr>
         <tr>
           <td><span class="chip chip-soft">POST</span></td>
           <td>/api/v1/predict-edf/</td>
-          <td>Pipeline EDF đầy đủ — form multipart với trường <code>file</code></td>
-          <td><span class="chip chip-success">Hoạt động</span></td>
+          <td>Xử lý file EDF thô: MNE → epoch 2 giây → 24 đặc trưng → model.</td>
+          <td>Dùng file EDF CAP nếu có trong dữ liệu local.</td>
         </tr>
         <tr>
           <td><span class="chip chip-soft">POST</span></td>
           <td>/api/v1/ingest/</td>
-          <td>Nhận dữ liệu IoT — lưu bệnh nhân và epoch dự đoán</td>
-          <td><span class="chip chip-success">Hoạt động</span></td>
+          <td>Nhận batch IoT, lưu bệnh nhân/epoch và ghi feature store.</td>
+          <td><code>demo_web_iot/ingest_*.json</code></td>
         </tr>
       </tbody>
     </table>
   </div>
 </section>
-{% endblock %}
-
-{% block extra_scripts %}
-<script>
-  fetch("/api/v1/model-info/")
-    .then(r => r.json())
-    .then(data => {
-      const stage = data.model_stage || "Chưa xác định";
-      document.querySelectorAll(".chip").forEach(el => {
-        if (el.textContent.trim() === "{{ model_stage }}") {
-          el.textContent = stage;
-          el.className = "chip " + (
-            stage === "Production" ? "chip-success" :
-            stage === "Staging" ? "chip-warning" : "chip-soft"
-          );
-        }
-      });
-    })
-    .catch(() => {});
-</script>
 {% endblock %}
