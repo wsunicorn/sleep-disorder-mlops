@@ -28,6 +28,12 @@ data/monitoring/*
 mlruns/
 mlartifacts/
 
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
 # Model binaries — large binary files, use DVC or download separately
 models/*.pkl
 models/*.ubj
@@ -51,6 +57,13 @@ db.sqlite3
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated report/export artifacts
+docs/generated/
+docs/*_finish.docx
+docs/*_finish.md
+docs/*_finish_media/
+~$*.docx
 
 # Secrets
 .env
