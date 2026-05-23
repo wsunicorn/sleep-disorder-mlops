@@ -14,6 +14,9 @@ PUBLIC_APP_URL = os.environ.get(
     "PUBLIC_APP_URL",
     "http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com",
 )
+_PUBLIC_APP_USES_HTTPS = PUBLIC_APP_URL.startswith("https://")
+SESSION_COOKIE_SECURE = _PUBLIC_APP_USES_HTTPS
+CSRF_COOKIE_SECURE = _PUBLIC_APP_USES_HTTPS
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", f"{PUBLIC_APP_URL}:5000")
 MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
 MLFLOW_MODEL_STAGE = os.environ.get("MLFLOW_MODEL_STAGE", "Production")
