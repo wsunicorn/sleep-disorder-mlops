@@ -18,6 +18,7 @@ import pickle
 import subprocess
 import time
 from pathlib import Path
+from typing import Callable
 
 import mlflow
 import mlflow.sklearn
@@ -56,6 +57,18 @@ except ModuleNotFoundError:
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "mlruns")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "sleep-disorder-kaggle")
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
+
+
+def _training_threads() -> int:
+    value = os.getenv("TRAINING_NUM_THREADS") or os.getenv("OMP_NUM_THREADS") or "2"
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return 2
+
+
+for _thread_env in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_thread_env, str(_training_threads()))
 
 
 def _parse_s3_uri(uri: str) -> tuple[str, str]:
@@ -202,63 +215,79 @@ def load_training_data(
     return x, y, label_encoder, df
 
 
-def build_models(model_type: str, random_seed: int) -> dict[str, object]:
-    """Create the model set from the notebook."""
+def build_models(model_type: str, random_seed: int) -> dict[str, Callable[[], object]]:
+    """Create lazy model factories from the notebook.
+
+    Keeping the factories lazy avoids importing XGBoost and LightGBM native
+    runtimes at the same time before the first model trains. That is safer on
+    small CI runners where OpenMP-backed libraries can otherwise segfault.
+    """
     device, lgb_device = detect_devices()
-    models: dict[str, object] = {}
+    threads = _training_threads()
+    models: dict[str, Callable[[], object]] = {}
 
     if model_type in {"all", "xgboost"}:
-        from xgboost import XGBClassifier
+        def make_xgboost() -> object:
+            from xgboost import XGBClassifier
 
-        models["XGBoost"] = XGBClassifier(
-            n_estimators=500,
-            max_depth=7,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_weight=5,
-            gamma=0.2,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
-            device=device,
-            eval_metric="mlogloss",
-            n_jobs=-1,
-            random_state=random_seed,
-        )
+            return XGBClassifier(
+                n_estimators=500,
+                max_depth=7,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                min_child_weight=5,
+                gamma=0.2,
+                reg_alpha=0.1,
+                reg_lambda=1.0,
+                device=device,
+                tree_method="hist",
+                eval_metric="mlogloss",
+                n_jobs=threads,
+                random_state=random_seed,
+            )
+
+        models["XGBoost"] = make_xgboost
 
     if model_type in {"all", "lightgbm"}:
-        import lightgbm as lgb
+        def make_lightgbm() -> object:
+            import lightgbm as lgb
 
-        models["LightGBM"] = lgb.LGBMClassifier(
-            n_estimators=500,
-            num_leaves=63,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_samples=20,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
-            device_type=lgb_device,
-            n_jobs=-1,
-            random_state=random_seed,
-            verbose=-1,
-        )
+            return lgb.LGBMClassifier(
+                n_estimators=500,
+                num_leaves=63,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                min_child_samples=20,
+                reg_alpha=0.1,
+                reg_lambda=1.0,
+                device_type=lgb_device,
+                n_jobs=threads,
+                random_state=random_seed,
+                verbose=-1,
+            )
+
+        models["LightGBM"] = make_lightgbm
 
     if model_type in {"all", "randomforest"}:
-        models["RandomForest"] = RandomForestClassifier(
-            n_estimators=300,
-            max_depth=None,
-            min_samples_split=10,
-            class_weight="balanced",
-            n_jobs=-1,
-            random_state=random_seed,
-        )
+        def make_randomforest() -> object:
+            return RandomForestClassifier(
+                n_estimators=300,
+                max_depth=None,
+                min_samples_split=10,
+                class_weight="balanced",
+                n_jobs=threads,
+                random_state=random_seed,
+            )
+
+        models["RandomForest"] = make_randomforest
 
     return models
 
 
 def train_and_evaluate(
-    models: dict[str, object],
+    models: dict[str, Callable[[], object]],
     x_train: np.ndarray,
     x_val: np.ndarray,
     y_train: np.ndarray,
@@ -269,10 +298,11 @@ def train_and_evaluate(
     """Train each candidate model and return the best weighted-F1 model."""
     results: dict[str, dict[str, object]] = {}
 
-    for name, model in models.items():
+    for name, model_factory in models.items():
         logger.info(f"Training {name}")
         with mlflow.start_run(run_name=name) as run:
             logger.info(f"Run ID: {run.info.run_id}")
+            model = model_factory()
             fit_kwargs: dict[str, object] = {}
             if name in {"XGBoost", "LightGBM"}:
                 fit_kwargs["sample_weight"] = sample_weights
@@ -289,7 +319,9 @@ def train_and_evaluate(
                 ]
 
             model.fit(x_train, y_train, **fit_kwargs)
+            logger.info(f"{name}: generating validation predictions")
             y_pred = model.predict(x_val)
+            logger.info(f"{name}: computing validation metrics")
             f1 = f1_score(y_val, y_pred, average="weighted")
             acc = accuracy_score(y_val, y_pred)
             report = classification_report(
@@ -311,6 +343,7 @@ def train_and_evaluate(
             )
             mlflow.log_metrics({"val_f1_weighted": f1, "val_accuracy": acc})
             mlflow.log_text(report, "classification_report.txt")
+            logger.info(f"{name}: logging model to MLflow")
             mlflow.sklearn.log_model(
                 model,
                 artifact_path="model",
