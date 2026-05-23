@@ -3,8 +3,10 @@ from collections import Counter
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib import messages
 from django.db.models import Avg, Count
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from .models import Patient, EpochPrediction
 
@@ -224,6 +226,20 @@ def patient_detail(request, patient_id):
             "class_distribution_json": class_distribution_json,
         },
     )
+
+
+@require_POST
+def patient_delete(request, patient_id):
+    patient = get_object_or_404(Patient, patient_id=patient_id)
+    display_code = patient.display_patient_code
+    raw_id = patient.patient_id
+    epoch_count = patient.predictions.count()
+    patient.delete()
+    messages.success(
+        request,
+        f"Đã xóa hồ sơ {display_code} ({raw_id}) cùng {epoch_count} epoch liên quan.",
+    )
+    return redirect("patient_list")
 
 
 def predict_page(request):

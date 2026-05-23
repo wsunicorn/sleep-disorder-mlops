@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
+from django.utils import timezone
 
 
 PREDICT_URL = "/api/v1/predict/"
@@ -245,3 +246,40 @@ class TestDashboardPages:
     def test_pipeline_page_returns_200(self, django_client):
         response = django_client.get("/pipeline/")
         assert response.status_code == 200
+
+    def test_patient_delete_requires_post(self, django_client):
+        response = django_client.get("/patients/demo-iot-healthy-999/delete/")
+        assert response.status_code == 405
+
+    def test_patient_delete_removes_patient_and_epochs(self, django_client):
+        from dashboard.models import Patient, EpochPrediction
+
+        patient = Patient.objects.create(
+            patient_id="demo-iot-healthy-999",
+            diagnosis="healthy",
+            age=28,
+            gender="F",
+        )
+        EpochPrediction.objects.create(
+            patient=patient,
+            epoch_index=0,
+            predicted_class="healthy",
+            confidence=0.91,
+            timestamp=timezone.now(),
+        )
+
+        response = django_client.post(f"/patients/{patient.patient_id}/delete/", follow=True)
+
+        assert response.status_code == 200
+        assert not Patient.objects.filter(patient_id=patient.patient_id).exists()
+        assert EpochPrediction.objects.count() == 0
+        assert "Đã xóa hồ sơ DEMO-IOT-HEA-999" in response.content.decode("utf-8")
+
+    def test_patient_display_code_keeps_raw_id_intact(self):
+        from dashboard.models import Patient
+
+        patient = Patient(patient_id="demo-rich-insomnia-01", diagnosis="insomnia")
+
+        assert patient.patient_id == "demo-rich-insomnia-01"
+        assert patient.display_patient_code == "DEMO-RICH-INS-01"
+        assert patient.source_label == "Demo IoT đa bệnh nhân"

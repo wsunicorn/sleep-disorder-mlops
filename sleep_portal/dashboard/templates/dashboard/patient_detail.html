@@ -11,9 +11,15 @@
   <div class="section-heading">
     <div>
       <span class="eyebrow">Chi tiết bệnh nhân</span>
-      <h1 class="page-title">{{ patient.patient_id }}</h1>
+      <h1 class="page-title">{{ patient.display_patient_code }}</h1>
+      <p class="helper-text mb-0">ID gốc: <code>{{ patient.patient_id }}</code> · {{ patient.source_label }}</p>
     </div>
-    <a class="btn btn-outline-dark btn-pill" href="{% url 'patient_list' %}">← Về danh sách</a>
+    <div class="page-actions">
+      <a class="btn btn-outline-dark btn-pill" href="{% url 'patient_list' %}">← Về danh sách</a>
+      <button class="btn btn-outline-danger btn-pill" type="button" data-bs-toggle="modal" data-bs-target="#delete-patient-modal">
+        Xóa hồ sơ
+      </button>
+    </div>
   </div>
   <div class="row g-3">
     <div class="col-md-3">
@@ -122,6 +128,34 @@
     </table>
   </div>
 </section>
+
+<div class="modal fade" id="delete-patient-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <span class="eyebrow">Xác nhận xóa</span>
+          <h5 class="modal-title">Xóa hồ sơ {{ patient.display_patient_code }}</h5>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <p class="helper-text mb-2">
+          Hành động này sẽ xóa bệnh nhân <strong>{{ patient.patient_id }}</strong> và toàn bộ
+          <strong>{{ n_epochs }}</strong> epoch liên quan khỏi database.
+        </p>
+        <p class="helper-text mb-0">Nếu đây là dữ liệu demo, có thể tạo lại bằng script trong <code>demo_web_iot</code>.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-dark btn-pill" data-bs-dismiss="modal">Hủy</button>
+        <form method="post" action="{% url 'patient_delete' patient.patient_id %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger btn-pill">Xóa bệnh nhân</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}

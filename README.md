@@ -728,8 +728,9 @@ File chính:
 Kết quả:
 
 - Trang tổng quan KPI.
-- Trang hồ sơ bệnh nhân có tìm kiếm nhanh, số epoch và độ tin cậy trung bình.
-- Trang chi tiết bệnh nhân theo epoch.
+- Trang hồ sơ bệnh nhân có tìm kiếm nhanh, mã hiển thị chuẩn hóa, nguồn dữ liệu, số epoch và độ tin cậy trung bình.
+- Trang chi tiết bệnh nhân theo epoch, có biểu đồ timeline và phân bố lớp.
+- Có thao tác xóa bệnh nhân bằng modal xác nhận; khi xóa, các epoch liên quan được xóa theo quan hệ cascade trong database.
 - Trang Studio Suy luận cho vector đơn, CSV batch, EDF và ví dụ REST API.
 - Trang MLOps Pipeline phản ánh đúng kiến trúc hiện tại: Django/DRF, MLflow, S3, RDS, ECS, ALB, GitHub Actions và Evidently.
 
@@ -737,6 +738,7 @@ Kết quả:
 
 - Người demo có thể thấy hệ thống hoạt động mà không cần gọi API thủ công.
 - Kết quả từ simulator có thể được ghi vào DB và xem lại theo bệnh nhân.
+- `patient_id` gốc được giữ nguyên để upsert API ổn định; UI sinh thêm mã hiển thị như `DEMO-RICH-INS-01`, `DEMO-IOT-HEA-001`, `CAP-PT-001` để danh sách đồng nhất khi báo cáo/demo.
 - Giao diện giúp giải thích kiến trúc MLOps cho người xem.
 - Bộ dữ liệu `demo_web_iot/` giúp demo từng phần ngay cả khi không có file EDF lớn.
 
