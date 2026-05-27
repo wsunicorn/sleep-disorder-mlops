@@ -34,6 +34,9 @@ mlartifacts/
 coverage.xml
 htmlcov/
 
+# Demo runtime state
+demo_web_iot/runtime/
+
 # Model binaries — large binary files, use DVC or download separately
 models/*.pkl
 models/*.ubj
@@ -63,6 +66,7 @@ docs/generated/
 docs/*_finish.docx
 docs/*_finish.md
 docs/*_finish_media/
+docs/Nhom19_demo.mp4
 ~$*.docx
 
 # Secrets

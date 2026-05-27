@@ -1015,6 +1015,8 @@ Thư mục `demo_web_iot/` chứa hai mức demo:
 - `generated/`: bộ demo lớn đã sinh sẵn, gồm 24 bệnh nhân, 1152 epoch và đủ 7 nhóm bệnh.
 - `generate_rich_iot_demo.py`: sinh lại bộ demo lớn từ `feature_stats.json`.
 - `run_rich_demo.ps1`: post bộ demo lớn lên API để dashboard có nhiều dữ liệu hơn.
+- `realtime_iot_stream.py` và `run_realtime_iot.ps1`: mô phỏng gateway IoT gửi epoch theo chu kỳ, gọi `/predict/` trước rồi ingest kết quả vào hệ thống.
+- `delete_patients.py` và `delete_patients.ps1`: dọn bệnh nhân demo qua route xóa của dashboard, có chế độ dry-run/list trước khi xóa thật.
 
 Chạy với server local:
 
@@ -1057,7 +1059,33 @@ Kết quả mặc định của bộ rich demo:
 - 24 bệnh nhân, mỗi bệnh nhân 48 epoch.
 - 1152 epoch ingest vào hệ thống.
 - CSV `generated/predict_batch_rich.csv` có 56 dòng để test tab CSV theo lô.
-- Các ca `demo-rich-mixed-*` có timeline nhiều nhãn để trình bày biểu đồ bệnh nhân.
+- Các ca `demo-rich-mixed-*` có timeline nhiều nhãn để trình bày biểu đồ bệnh nhân; chữ `mixed` chỉ là kịch bản demo trong `patient_id`, còn diagnosis vẫn thuộc 7 lớp chính thức.
+
+Chạy demo realtime IoT trên production:
+
+```powershell
+.\demo_web_iot\run_realtime_iot.ps1 `
+  -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
+  -SessionId live-demo `
+  -PatientsPerClass 1 `
+  -MixedPatients 1 `
+  -Cycles 8 `
+  -EpochsPerCycle 4 `
+  -Interval 1.5 `
+  -Workers 2 `
+  -Retries 5
+```
+
+Demo realtime khác với `run_rich_demo.ps1`: mỗi chu kỳ chỉ gửi một lô epoch nhỏ, luôn gọi model production qua `/api/v1/predict/` trước khi ghi kết quả vào `/api/v1/ingest/`. Script có state file `demo_web_iot/runtime/realtime_state.json`, nên chạy lại cùng `SessionId` sẽ tiếp tục từ epoch tiếp theo thay vì ghi đè. Dữ liệu này không gắn cờ `training_approved`, vì đây là dữ liệu mô phỏng chỉ dùng cho dashboard, monitoring và drift demo. Các ca realtime `mixed` cũng giữ diagnosis thuộc 7 lớp CAP, tránh tạo nhầm một lớp bệnh thứ tám trên dashboard. Script không gọi preflight `/api/v1/health/` mặc định để tránh tốn quota throttle; nếu cần thì thêm `-CheckApi`. Nếu production trả về `429 Too Many Requests`, giảm nhịp bằng `-Workers 1 -Interval 3 -Retries 8`; cấu hình DRF trong project cũng cho phép nâng rate-limit qua `DRF_ANON_THROTTLE_RATE`.
+
+Khi cần dọn dữ liệu demo hoặc xóa các hồ sơ có diagnosis lạ:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -UnknownDiagnosis -List
+.\demo_web_iot\delete_patients.ps1 -UnknownDiagnosis -Yes
+.\demo_web_iot\delete_patients.ps1 -MixedDemo -Yes
+.\demo_web_iot\delete_patients.ps1 -AllDemo -Yes
+```
 
 Nếu muốn demo từ EDF thật theo kiểu thiết bị IoT gửi dữ liệu về hệ thống:
 

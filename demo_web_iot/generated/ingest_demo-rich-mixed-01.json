@@ -1,7 +1,7 @@
 {
   "patient_id": "demo-rich-mixed-01",
-  "disorder": "monitoring_case",
-  "age": 54,
+  "disorder": "healthy",
+  "age": 36,
   "gender": "F",
   "epochs": [
     {

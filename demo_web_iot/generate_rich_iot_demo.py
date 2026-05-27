@@ -46,6 +46,7 @@ FEATURE_NAMES = [
 ]
 
 LABELS = ["healthy", "insomnia", "narcolepsy", "nfle", "plm", "rbd", "sdb"]
+MIXED_TIMELINE_PATTERN = ["healthy", "insomnia", "narcolepsy", "nfle", "sdb", "rbd", "plm"]
 RELATIVE_INDICES = [1, 3, 5, 7, 9]
 NON_NEGATIVE_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23]
 
@@ -57,7 +58,6 @@ AGE_RANGES = {
     "plm": (40, 72),
     "rbd": (48, 76),
     "sdb": (42, 74),
-    "monitoring_case": (25, 65),
 }
 
 CONFIDENCE_RANGES = {
@@ -95,8 +95,15 @@ def sample_feature(stats: dict[str, dict[str, list[float]]], label: str, rng: ra
     return [round_feature(value) for value in values]
 
 
-def choose_prediction(primary_label: str, feature_label: str, epoch_index: int, rng: random.Random) -> str:
-    if primary_label == "monitoring_case":
+def choose_prediction(
+    primary_label: str,
+    feature_label: str,
+    epoch_index: int,
+    rng: random.Random,
+    *,
+    mixed_case: bool = False,
+) -> str:
+    if mixed_case:
         return feature_label
 
     # Short unstable bands make the patient detail timeline less flat.
@@ -107,16 +114,16 @@ def choose_prediction(primary_label: str, feature_label: str, epoch_index: int, 
     return primary_label if rng.random() < 0.88 else feature_label
 
 
-def confidence_for(label: str, predicted: str, rng: random.Random) -> float:
+def confidence_for(label: str, predicted: str, rng: random.Random, *, mixed_case: bool = False) -> float:
     lo, hi = CONFIDENCE_RANGES.get(predicted, (0.58, 0.82))
     value = rng.uniform(lo, hi)
-    if predicted != label and label != "monitoring_case":
+    if predicted != label and not mixed_case:
         value -= rng.uniform(0.04, 0.12)
     return round(max(0.5, min(0.98, value)), 3)
 
 
 def patient_meta(label: str, index: int, rng: random.Random, prefix: str) -> dict[str, Any]:
-    lo, hi = AGE_RANGES.get(label, AGE_RANGES["monitoring_case"])
+    lo, hi = AGE_RANGES.get(label, (25, 65))
     return {
         "patient_id": f"{prefix}-{label.replace('_', '-')}-{index:02d}",
         "disorder": label,
@@ -125,10 +132,15 @@ def patient_meta(label: str, index: int, rng: random.Random, prefix: str) -> dic
     }
 
 
-def feature_label_for_patient(primary_label: str, epoch_index: int, rng: random.Random) -> str:
-    if primary_label == "monitoring_case":
-        pattern = ["healthy", "insomnia", "narcolepsy", "nfle", "sdb", "rbd", "plm"]
-        return pattern[(epoch_index // 6) % len(pattern)]
+def feature_label_for_patient(
+    primary_label: str,
+    epoch_index: int,
+    rng: random.Random,
+    *,
+    mixed_case: bool = False,
+) -> str:
+    if mixed_case:
+        return MIXED_TIMELINE_PATTERN[(epoch_index // 6) % len(MIXED_TIMELINE_PATTERN)]
     if primary_label == "healthy":
         return "healthy" if rng.random() < 0.94 else rng.choice(["insomnia", "sdb"])
     return primary_label if rng.random() < 0.9 else rng.choice(["healthy", primary_label])
@@ -141,17 +153,18 @@ def build_patient_payload(
     epochs: int,
     start_time: datetime,
     rng: random.Random,
+    mixed_case: bool = False,
 ) -> dict[str, Any]:
     records = []
     primary_label = patient["disorder"]
     for epoch_index in range(epochs):
-        feature_label = feature_label_for_patient(primary_label, epoch_index, rng)
-        predicted = choose_prediction(primary_label, feature_label, epoch_index, rng)
+        feature_label = feature_label_for_patient(primary_label, epoch_index, rng, mixed_case=mixed_case)
+        predicted = choose_prediction(primary_label, feature_label, epoch_index, rng, mixed_case=mixed_case)
         records.append(
             {
                 "epoch_index": epoch_index,
                 "predicted_class": predicted,
-                "confidence": confidence_for(primary_label, predicted, rng),
+                "confidence": confidence_for(primary_label, predicted, rng, mixed_case=mixed_case),
                 "timestamp": (start_time + timedelta(seconds=epoch_index * 2)).isoformat().replace("+00:00", "Z"),
                 "label": feature_label,
                 "features": sample_feature(stats, feature_label, rng),
@@ -226,7 +239,8 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
             patient_number += 1
 
     for mixed_index in range(1, args.mixed_patients + 1):
-        patient = patient_meta("monitoring_case", mixed_index, rng, args.prefix)
+        primary_label = LABELS[(mixed_index - 1) % len(LABELS)]
+        patient = patient_meta(primary_label, mixed_index, rng, args.prefix)
         patient["patient_id"] = f"{args.prefix}-mixed-{mixed_index:02d}"
         payload = build_patient_payload(
             stats,
@@ -234,6 +248,7 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
             epochs=args.epochs_per_patient,
             start_time=start + timedelta(minutes=patient_number * 3),
             rng=rng,
+            mixed_case=True,
         )
         filename = f"ingest_{patient['patient_id']}.json"
         write_json(output_dir / filename, payload)

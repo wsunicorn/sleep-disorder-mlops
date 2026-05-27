@@ -1,82 +1,161 @@
-# Bộ dữ liệu demo IoT cho web app
+# Bộ demo IoT cho web app
 
-Thư mục này dùng để demo từng phần của website Sleep Disorder MLOps mà không cần chuẩn bị lại dữ liệu từ đầu.
+Thư mục này dùng để demo các luồng API và giao diện của hệ thống Sleep Disorder MLOps mà không phải xử lý lại EDF lớn trong lúc trình bày.
 
-## Các file chính
+## Các mức demo
 
-- `feature_names.json`: danh sách 24 đặc trưng EEG đúng theo notebook `kaggle_cap_training.ipynb`.
-- `predict_single_healthy.json`: payload mẫu cho `POST /api/v1/predict/`.
-- `predict_batch.csv`: batch CSV để tải trực tiếp lên tab "CSV theo lô" trên trang Studio Suy luận.
-- `ingest_patient_healthy.json`: phiên IoT giả lập cho bệnh nhân bình thường.
-- `ingest_patient_insomnia.json`: phiên IoT giả lập cho bệnh nhân mất ngủ.
-- `ingest_patient_mixed.json`: phiên IoT giả lập có nhiều nhãn dự đoán để demo biểu đồ timeline.
-- `run_demo_rest.ps1`: script gọi lần lượt health, model-info, predict single, predict batch và ingest.
-- `generate_rich_iot_demo.py`: sinh bộ demo lớn từ `feature_stats.json`.
-- `run_rich_demo.ps1`: sinh/post nhiều bệnh nhân và nhiều epoch lên API.
-- `generated/`: bộ demo đã sinh sẵn gồm 24 bệnh nhân, 1152 epoch và CSV 56 dòng.
+### 1. Demo nhanh bằng file tĩnh
 
-## Chạy nhanh bằng PowerShell
-
-Chạy với server local:
+Các file `predict_single_healthy.json`, `predict_batch.csv` và `ingest_patient_*.json` phù hợp khi cần kiểm thử nhanh REST API.
 
 ```powershell
-.\demo_web_iot\run_demo_rest.ps1 -BaseUrl http://127.0.0.1:8000
-```
-
-Chạy với production ALB:
-
-```powershell
-.\demo_web_iot\run_demo_rest.ps1 -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
-```
-
-## Chạy demo lớn nhiều bệnh nhân/nhiều epoch
-
-Chạy với production ALB:
-
-```powershell
-.\demo_web_iot\run_rich_demo.ps1 `
+.\demo_web_iot\run_demo_rest.ps1 `
   -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com
 ```
 
-Mặc định script dùng bộ `generated/` đã sinh sẵn:
+Script sẽ gọi:
 
-- 24 bệnh nhân.
-- 1152 epoch.
-- Đủ 7 nhóm: `healthy`, `insomnia`, `narcolepsy`, `nfle`, `plm`, `rbd`, `sdb`.
-- 3 bệnh nhân mixed để biểu đồ timeline có nhiều nhãn.
+- `GET /api/v1/health/`
+- `GET /api/v1/model-info/`
+- `POST /api/v1/predict/`
+- `POST /api/v1/ingest/`
 
-Muốn sinh lại bộ lớn hơn:
+### 2. Demo nạp nhiều bệnh nhân
+
+`generate_rich_iot_demo.py` sinh bộ dữ liệu lớn từ `feature_stats.json`: đủ 7 lớp bệnh, nhiều bệnh nhân, nhiều epoch và vài ca mixed để biểu đồ timeline sinh động.
 
 ```powershell
 .\demo_web_iot\run_rich_demo.ps1 `
   -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
   -Regenerate `
-  -PatientsPerClass 5 `
-  -MixedPatients 5 `
-  -EpochsPerPatient 96
+  -PatientsPerClass 3 `
+  -MixedPatients 3 `
+  -EpochsPerPatient 48
 ```
 
-Muốn chỉ post vài bệnh nhân để demo nhanh:
+Kịch bản này phù hợp để làm dashboard và danh sách bệnh nhân có nhiều dữ liệu ngay lập tức.
+
+### 3. Demo realtime IoT
+
+`realtime_iot_stream.py` mô phỏng nhiều gateway IoT gửi dữ liệu theo từng nhịp nhỏ. Mỗi chu kỳ sẽ:
+
+1. Sinh 24 đặc trưng EEG cho từng epoch.
+2. Gọi model production qua `POST /api/v1/predict/`.
+3. Lấy nhãn dự đoán trả về.
+4. Gửi kết quả dự đoán và feature vào `POST /api/v1/ingest/`.
+5. Ghi state vào `demo_web_iot/runtime/realtime_state.json` để lần sau chạy tiếp epoch mới.
+
+Chạy demo production:
 
 ```powershell
-.\demo_web_iot\run_rich_demo.ps1 `
+.\demo_web_iot\run_realtime_iot.ps1 `
   -BaseUrl http://sleep-portal-alb-67325866.ap-southeast-1.elb.amazonaws.com `
-  -MaxFiles 5
+  -SessionId live-demo `
+  -PatientsPerClass 1 `
+  -MixedPatients 1 `
+  -Cycles 8 `
+  -EpochsPerCycle 4 `
+  -Interval 1.5 `
+  -Workers 2 `
+  -Retries 5
 ```
 
-Sau khi chạy xong, mở:
+Script không gọi preflight `/api/v1/health/` mặc định để tránh tốn quota throttle trước khi demo. Nếu cần kiểm tra health riêng trước khi chạy, thêm `-CheckApi`.
 
-- `/` để xem KPI tổng quan.
-- `/patients/` để xem các bệnh nhân demo.
-- `/patients/demo-iot-mixed-001/` để xem timeline epoch.
-- `/patients/demo-rich-mixed-01/` để xem timeline nhiều epoch của bộ demo lớn.
-- `/pipeline/` để trình bày luồng MLOps.
+Chạy lại cùng `SessionId` sẽ tiếp tục tăng `epoch_index`, giống thiết bị IoT gửi thêm dữ liệu mới. Nếu muốn bắt đầu lại từ epoch 0:
 
-## Demo bằng giao diện
+```powershell
+.\demo_web_iot\run_realtime_iot.ps1 `
+  -SessionId live-demo `
+  -ResetSession
+```
 
-1. Mở `/predict/`.
-2. Tab "Vector đơn lẻ": dán nội dung trong `predict_single_healthy.json`, hoặc bấm "Tải dữ liệu mẫu".
-3. Tab "CSV theo lô": tải file `predict_batch.csv`.
-4. Tab "JSON / API": dùng curl mẫu hoặc chạy script `run_demo_rest.ps1`.
-5. Khi cần dashboard nhiều dữ liệu, chạy `run_rich_demo.ps1`.
-6. Mở `/patients/` để xác nhận dữ liệu IoT đã được ingest vào hệ thống.
+Nếu production trả về `429 Too Many Requests`, nghĩa là API đang giới hạn tần suất request. Hãy giảm nhịp gửi hoặc số luồng:
+
+```powershell
+.\demo_web_iot\run_realtime_iot.ps1 `
+  -SessionId live-demo `
+  -Workers 1 `
+  -Interval 3 `
+  -Retries 8
+```
+
+Chạy kiểm tra không gửi API:
+
+```powershell
+.\demo_web_iot\run_realtime_iot.ps1 `
+  -DryRun `
+  -Cycles 2 `
+  -EpochsPerCycle 2
+```
+
+Chạy liên tục cho tới khi bấm `Ctrl+C`:
+
+```powershell
+.\demo_web_iot\run_realtime_iot.ps1 `
+  -SessionId live-demo `
+  -Cycles 0 `
+  -Interval 2
+```
+
+### 4. Dọn dữ liệu demo/bệnh nhân
+
+`delete_patients.py` và `delete_patients.ps1` dùng route xóa có sẵn của dashboard để xóa bệnh nhân cùng toàn bộ epoch liên quan. Mặc định script chỉ liệt kê hoặc dry-run; muốn xóa thật phải thêm `-Yes`.
+
+Liệt kê các bệnh nhân có diagnosis không thuộc 7 lớp chính thức:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -UnknownDiagnosis -List
+```
+
+Xóa các bệnh nhân có diagnosis lạ:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -UnknownDiagnosis -Yes
+```
+
+Xóa các ca demo mixed cũ:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -MixedDemo -Yes
+```
+
+Xóa toàn bộ dữ liệu demo đã ingest, giữ lại các hồ sơ mẫu CAP `PT-*`:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -AllDemo -List
+.\demo_web_iot\delete_patients.ps1 -AllDemo -Yes
+```
+
+Xóa riêng từng nhóm demo:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -DemoRich -Yes
+.\demo_web_iot\delete_patients.ps1 -RealtimeDemo -Yes
+.\demo_web_iot\delete_patients.ps1 -QuickDemo -Yes
+```
+
+Xóa theo mã cụ thể hoặc prefix:
+
+```powershell
+.\demo_web_iot\delete_patients.ps1 -PatientId demo-iot-mixed-001 -Yes
+.\demo_web_iot\delete_patients.ps1 -IdPrefix demo-rich- -Yes
+```
+
+## Ý nghĩa dữ liệu realtime
+
+- `patient_id` có dạng `iot-<session>-<label>-<index>` để dễ tìm trên trang `/patients/`.
+- Với ca `mixed`, chữ `mixed` chỉ nằm trong mã bệnh nhân để nhận biết kịch bản timeline nhiều nhãn; trường `disorder` vẫn luôn thuộc 7 lớp chính thức: `healthy`, `insomnia`, `narcolepsy`, `nfle`, `plm`, `rbd`, `sdb`.
+- `device_id` có dạng `gw-<session>-...`, mô phỏng gateway hoặc thiết bị đeo gửi dữ liệu.
+- `label` trong payload là nhãn mô phỏng chưa xác thực, dùng cho monitoring/drift và demo timeline.
+- Script không gửi `training_approved=true`, vì dữ liệu IoT demo không nên tự động trở thành ground truth huấn luyện.
+- Nếu muốn dữ liệu mới được retrain dùng thật, cần có quy trình xác thực nhãn và thêm cờ `training_approved` hoặc `label_verified` cho từng epoch.
+
+## Trang nên mở khi demo
+
+- Dashboard: `/`
+- Studio suy luận: `/predict/`
+- Hồ sơ bệnh nhân: `/patients/`
+- Một bệnh nhân realtime: `/patients/iot-live-demo-healthy-01/`
+- Một ca mixed realtime: `/patients/iot-live-demo-mixed-01/`
+- Pipeline MLOps: `/pipeline/`

@@ -9,7 +9,6 @@ _DIAGNOSIS_CODE = {
     "plm": "PLM",
     "rbd": "RBD",
     "sdb": "SDB",
-    "monitoring_case": "MON",
 }
 
 
