@@ -12,9 +12,13 @@ on:
         required: false
         default: ""
       extra_data:
-        description: "Optional new/current feature parquet/prefix to append"
+        description: "Optional verified feature parquet/prefix to append"
         required: false
         default: ""
+      extra_data_policy:
+        description: "verified_only, include_all, or ignore"
+        required: false
+        default: "verified_only"
       artifact_s3_uri:
         description: "S3 prefix for serving artifacts"
         required: false
@@ -42,6 +46,7 @@ env:
   MODEL_PROMOTE_STAGE: ${{ vars.MODEL_PROMOTE_STAGE || 'Production' }}
   MODEL_PROMOTE_THRESHOLD: ${{ vars.MODEL_PROMOTE_THRESHOLD || '0.55' }}
   MODEL_REQUIRE_PROMOTION: ${{ vars.MODEL_REQUIRE_PROMOTION || 'true' }}
+  RETRAIN_EXTRA_DATA_POLICY: ${{ vars.RETRAIN_EXTRA_DATA_POLICY || 'verified_only' }}
   TRAINING_NUM_THREADS: ${{ vars.TRAINING_NUM_THREADS || '2' }}
   OMP_NUM_THREADS: ${{ vars.TRAINING_NUM_THREADS || '2' }}
   OPENBLAS_NUM_THREADS: ${{ vars.TRAINING_NUM_THREADS || '2' }}
@@ -94,6 +99,7 @@ jobs:
           TRAINING_DATA="${{ inputs.training_data }}"
           ARTIFACT_URI="${{ inputs.artifact_s3_uri }}"
           MODEL_TYPE="${{ inputs.model_type }}"
+          EXTRA_POLICY="${{ inputs.extra_data_policy }}"
 
           if [ -z "$TRAINING_DATA" ]; then
             TRAINING_DATA="$DEFAULT_TRAINING_DATA"
@@ -104,13 +110,18 @@ jobs:
           if [ -z "$MODEL_TYPE" ]; then
             MODEL_TYPE="all"
           fi
+          if [ -z "$EXTRA_POLICY" ]; then
+            EXTRA_POLICY="$RETRAIN_EXTRA_DATA_POLICY"
+          fi
 
           echo "training_data=$TRAINING_DATA" >> "$GITHUB_OUTPUT"
           echo "artifact_s3_uri=$ARTIFACT_URI" >> "$GITHUB_OUTPUT"
           echo "model_type=$MODEL_TYPE" >> "$GITHUB_OUTPUT"
+          echo "extra_data_policy=$EXTRA_POLICY" >> "$GITHUB_OUTPUT"
           echo "Retrain reason: ${{ inputs.reason }}"
           echo "Training data: $TRAINING_DATA"
           echo "Extra data: ${{ inputs.extra_data }}"
+          echo "Extra data policy: $EXTRA_POLICY"
           echo "Artifact URI: $ARTIFACT_URI"
           echo "Model type: $MODEL_TYPE"
 
@@ -131,6 +142,7 @@ jobs:
             --data-dir "${{ steps.retrain-inputs.outputs.training_data }}" \
             --model-dir models \
             --model-type "${{ steps.retrain-inputs.outputs.model_type }}" \
+            --extra-data-policy "${{ steps.retrain-inputs.outputs.extra_data_policy }}" \
             --artifact-s3-uri "${{ steps.retrain-inputs.outputs.artifact_s3_uri }}" \
             "${PROMOTION_ARGS[@]}" \
             "${EXTRA_ARGS[@]}"

@@ -57,6 +57,13 @@ except ModuleNotFoundError:
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "mlruns")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "sleep-disorder-kaggle")
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "sleep-disorder-classifier")
+EXTRA_DATA_POLICIES = {"verified_only", "include_all", "ignore"}
+VERIFIED_LABEL_COLUMNS = (
+    "training_approved",
+    "label_verified",
+    "ground_truth_verified",
+    "verified_for_training",
+)
 
 
 def _training_threads() -> int:
@@ -172,19 +179,106 @@ def _load_feature_frame(
     )
 
 
+def _truthy_series(series: pd.Series) -> pd.Series:
+    if series.dtype == bool:
+        return series.fillna(False)
+    normalized = series.fillna("").astype(str).str.strip().str.lower()
+    return normalized.isin({"1", "true", "yes", "y", "approved", "verified"})
+
+
+def _filter_extra_training_frame(
+    df: pd.DataFrame,
+    *,
+    source: str,
+    policy: str,
+) -> pd.DataFrame:
+    if policy == "include_all":
+        logger.warning(
+            f"Including all extra training rows from {source}. "
+            "Use this only for reviewed ground-truth datasets."
+        )
+        return df.copy()
+
+    if policy == "ignore":
+        logger.info(f"Ignoring extra training data from {source} by policy.")
+        return df.iloc[0:0].copy()
+
+    available_flags = [name for name in VERIFIED_LABEL_COLUMNS if name in df.columns]
+    if not available_flags:
+        logger.warning(
+            f"Skipping {len(df)} extra rows from {source}: no verified-label flag found. "
+            f"Expected one of: {', '.join(VERIFIED_LABEL_COLUMNS)}."
+        )
+        return df.iloc[0:0].copy()
+
+    mask = pd.Series(False, index=df.index)
+    for column in available_flags:
+        mask = mask | _truthy_series(df[column])
+
+    filtered = df[mask].copy()
+    skipped = len(df) - len(filtered)
+    if skipped:
+        logger.warning(
+            f"Skipped {skipped} unverified rows from {source}; "
+            f"kept {len(filtered)} verified rows."
+        )
+    return filtered
+
+
+def summarize_training_frame(df: pd.DataFrame) -> dict[str, object]:
+    source_counts = {}
+    if "_training_source" in df.columns:
+        source_counts = {
+            str(key): int(value)
+            for key, value in df["_training_source"].value_counts().to_dict().items()
+        }
+
+    label_col = "disease" if "disease" in df.columns else "label"
+    label_counts = {
+        str(key): int(value)
+        for key, value in df[label_col].value_counts().to_dict().items()
+    }
+    return {
+        "rows": int(len(df)),
+        "source_counts": source_counts,
+        "label_counts": label_counts,
+    }
+
+
 def load_training_data(
     data_dir: str,
     class_limits: dict[str, int | None],
     allow_synthetic: bool = False,
     extra_data: list[str] | None = None,
+    extra_data_policy: str = "verified_only",
 ) -> tuple[np.ndarray, np.ndarray, LabelEncoder, pd.DataFrame]:
     """Load or build a 24-feature disease-classification dataset."""
+    if extra_data_policy not in EXTRA_DATA_POLICIES:
+        raise ValueError(
+            f"extra_data_policy must be one of {sorted(EXTRA_DATA_POLICIES)}, "
+            f"got {extra_data_policy!r}"
+        )
+
     df = _load_feature_frame(data_dir, class_limits, allow_synthetic)
+    df = df.copy()
+    df["_training_source"] = "base"
     for extra_path in extra_data or []:
         if not extra_path:
             continue
         extra_df = _load_feature_frame(extra_path, class_limits, False)
-        logger.info(f"Appending extra training data from {extra_path}: {len(extra_df)} rows")
+        logger.info(
+            f"Loaded extra training candidate data from {extra_path}: "
+            f"{len(extra_df)} rows"
+        )
+        extra_df = _filter_extra_training_frame(
+            extra_df,
+            source=extra_path,
+            policy=extra_data_policy,
+        )
+        if extra_df.empty:
+            continue
+        extra_df["_training_source"] = "extra_verified"
+        logger.info(f"Appending verified extra training data from {extra_path}: {len(extra_df)} rows")
         df = pd.concat([df, extra_df], ignore_index=True)
 
     label_col = "disease" if "disease" in df.columns else "label"
@@ -212,6 +306,8 @@ def load_training_data(
     )
     logger.info(f"Classes: {list(label_encoder.classes_)}")
     logger.info(f"Label distribution:\n{df[label_col].value_counts().to_string()}")
+    if "_training_source" in df.columns:
+        logger.info(f"Training source distribution:\n{df['_training_source'].value_counts().to_string()}")
     return x, y, label_encoder, df
 
 
@@ -294,6 +390,8 @@ def train_and_evaluate(
     y_val: np.ndarray,
     label_encoder: LabelEncoder,
     sample_weights: np.ndarray,
+    training_summary: dict[str, object],
+    extra_data_policy: str,
 ) -> tuple[str, dict[str, dict[str, object]]]:
     """Train each candidate model and return the best weighted-F1 model."""
     results: dict[str, dict[str, object]] = {}
@@ -338,7 +436,21 @@ def train_and_evaluate(
                     "n_features": x_train.shape[1],
                     "n_classes": len(label_encoder.classes_),
                     "n_train": len(x_train),
+                    "n_val": len(x_val),
                     "classes": list(label_encoder.classes_),
+                    "extra_data_policy": extra_data_policy,
+                }
+            )
+            mlflow.set_tags(
+                {
+                    "data_source_summary": json.dumps(
+                        training_summary.get("source_counts", {}),
+                        ensure_ascii=True,
+                    ),
+                    "label_summary": json.dumps(
+                        training_summary.get("label_counts", {}),
+                        ensure_ascii=True,
+                    ),
                 }
             )
             mlflow.log_metrics({"val_f1_weighted": f1, "val_accuracy": acc})
@@ -370,6 +482,8 @@ def export_artifacts(
     results: dict[str, dict[str, object]],
     label_encoder: LabelEncoder,
     device: str,
+    training_summary: dict[str, object],
+    extra_data_policy: str,
 ) -> None:
     """Export model artifacts expected by the Django serving layer."""
     output_dir = Path(model_dir)
@@ -402,6 +516,8 @@ def export_artifacts(
         "device": device,
         "run_id": results[best_name]["run_id"],
         "model_file": "model.pkl",
+        "extra_data_policy": extra_data_policy,
+        "training_summary": training_summary,
         "all_results": {
             name: {
                 "f1": round(float(result["f1"]), 4),
@@ -437,6 +553,8 @@ def promote_best_model(
     stage: str,
     threshold: float,
     require_promotion: bool,
+    training_summary: dict[str, object],
+    extra_data_policy: str,
 ) -> dict[str, object]:
     """Promote the registered MLflow model version that belongs to the best run."""
     if not stage:
@@ -499,6 +617,13 @@ def promote_best_model(
         "val_f1_weighted",
         f"{best_f1:.4f}",
     )
+    client.set_model_version_tag(MODEL_NAME, version.version, "extra_data_policy", extra_data_policy)
+    client.set_model_version_tag(
+        MODEL_NAME,
+        version.version,
+        "data_source_summary",
+        json.dumps(training_summary.get("source_counts", {}), ensure_ascii=True),
+    )
     return {
         "promoted": True,
         "model_name": MODEL_NAME,
@@ -511,8 +636,6 @@ def promote_best_model(
 
 def upload_artifacts_to_s3(model_dir: str, artifact_s3_uri: str) -> list[str]:
     """Upload serving artifacts to S3 so CI/CD and runtime sync can consume them."""
-    import boto3
-
     bucket, prefix = _parse_s3_uri(artifact_s3_uri)
     output_dir = Path(model_dir)
     files = [
@@ -524,12 +647,25 @@ def upload_artifacts_to_s3(model_dir: str, artifact_s3_uri: str) -> list[str]:
         Path("metrics.json"),
     ]
     uploaded: list[str] = []
-    s3 = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION"))
+    s3 = None
+    try:
+        import boto3
+
+        s3 = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION"))
+    except ModuleNotFoundError:
+        logger.warning("boto3 is not installed; falling back to AWS CLI for artifact upload.")
+
     for path in files:
         if not path.exists():
             continue
         key = "/".join(part for part in [prefix, path.name] if part)
-        s3.upload_file(str(path), bucket, key)
+        if s3 is not None:
+            s3.upload_file(str(path), bucket, key)
+        else:
+            subprocess.run(
+                ["aws", "s3", "cp", str(path), f"s3://{bucket}/{key}"],
+                check=True,
+            )
         uploaded.append(f"s3://{bucket}/{key}")
     logger.info(f"Uploaded {len(uploaded)} artifacts to {artifact_s3_uri}")
     return uploaded
@@ -553,6 +689,15 @@ def main() -> None:
         action="append",
         default=[],
         help="Additional feature parquet file/prefix to append to the training data.",
+    )
+    parser.add_argument(
+        "--extra-data-policy",
+        choices=sorted(EXTRA_DATA_POLICIES),
+        default=os.getenv("RETRAIN_EXTRA_DATA_POLICY", "verified_only"),
+        help=(
+            "How to use --extra-data. The production default only appends rows "
+            "with verified-label flags."
+        ),
     )
     parser.add_argument(
         "--artifact-s3-uri",
@@ -591,12 +736,14 @@ def main() -> None:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
-    x, y, label_encoder, _ = load_training_data(
+    x, y, label_encoder, training_df = load_training_data(
         args.data_dir,
         class_limits=class_limits,
         allow_synthetic=args.allow_synthetic,
         extra_data=args.extra_data,
+        extra_data_policy=args.extra_data_policy,
     )
+    training_summary = summarize_training_frame(training_df)
 
     stratify = y if np.bincount(y).min() >= 2 else None
     x_train, x_val, y_train, y_val = train_test_split(
@@ -621,8 +768,18 @@ def main() -> None:
         y_val,
         label_encoder,
         sample_weights,
+        training_summary,
+        args.extra_data_policy,
     )
-    export_artifacts(args.model_dir, best_name, results, label_encoder, device)
+    export_artifacts(
+        args.model_dir,
+        best_name,
+        results,
+        label_encoder,
+        device,
+        training_summary,
+        args.extra_data_policy,
+    )
     if args.artifact_s3_uri:
         upload_artifacts_to_s3(args.model_dir, args.artifact_s3_uri)
     if args.promote_stage:
@@ -632,6 +789,8 @@ def main() -> None:
             stage=args.promote_stage,
             threshold=args.promote_threshold,
             require_promotion=args.require_promotion,
+            training_summary=training_summary,
+            extra_data_policy=args.extra_data_policy,
         )
         logger.info(f"Promotion result: {promotion}")
 

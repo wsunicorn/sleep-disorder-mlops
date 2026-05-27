@@ -23,7 +23,17 @@ META_COLUMNS = {
     "predicted_class",
     "confidence",
     "ingested_at",
+    "training_approved",
+    "label_verified",
+    "ground_truth_verified",
+    "verified_for_training",
 }
+VERIFIED_LABEL_COLUMNS = (
+    "training_approved",
+    "label_verified",
+    "ground_truth_verified",
+    "verified_for_training",
+)
 
 
 def _safe_name(value: str) -> str:
@@ -88,6 +98,9 @@ def build_ingest_feature_frame(
                 "ingested_at": ingested_at,
             }
         )
+        for column in VERIFIED_LABEL_COLUMNS:
+            if column in epoch:
+                feature_row[column] = epoch.get(column)
         rows.append(feature_row)
 
     return pd.DataFrame(rows)

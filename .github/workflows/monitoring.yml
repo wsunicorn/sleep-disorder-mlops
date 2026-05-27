@@ -126,6 +126,7 @@ jobs:
             -f reason="Data drift detected by monitoring.yml (share=${{ steps.drift-result.outputs.drift_share }})" \
             -f training_data="$RETRAIN_TRAINING_DATA" \
             -f extra_data="${{ steps.drift-inputs.outputs.current_data }}" \
+            -f extra_data_policy="verified_only" \
             -f artifact_s3_uri="$MODEL_ARTIFACT_S3_URI" \
             -f model_type="all" \
             -f deploy_after_success="true"
